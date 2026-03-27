@@ -1,0 +1,481 @@
+; translate.qmd — Page Translator for reMarkable
+;
+; Adds a draggable floating translation box to xochitl's document view.
+; Tap the "T" button to expand/collapse the panel. Drag the header bar to
+; move it. Tap "Load OCR" to populate the source-text field from the
+; current page's OCR data, then choose a target language and tap
+; "Translate" to call the Google Translate API.
+;
+; Compatibility : xochitl 3.25 (hash selectors taken from FouzR/floating.qmd 3.25)
+;                 xochitl 3.26 may work unchanged — see README for details.
+; Depends       : qt-resource-rebuilder
+; Install path  : /home/root/xovi/exthome/qt-resource-rebuilder/translate.qmd
+;
+; ─────────────────────────────────────────────────────────────────────────────
+; AFFECT selectors (hashes) are taken from the document-view component that
+; the floating toolbar also targets (3.25/floating.qmd in FouzR/xovi-extensions).
+; The INSERT blocks use plain QML/JS — new identifiers never appear in the
+; hashtable and therefore do not need to be hashed.
+; ─────────────────────────────────────────────────────────────────────────────
+
+AFFECT [[6722609618937832156]]
+    TRAVERSE [[233699089663818]]#[[6504254477]]
+    LOCATE AFTER ALL
+    INSERT {
+        Item {
+            id: translatePanel
+
+            ; ── persisted position and state ──────────────────────────────
+            property var  savedX: 60
+            property var  savedY: 120
+            property bool expanded:   false
+            property bool loading:    false
+            property string result:   ""
+            property string sourceText: ""
+            property string targetLang: "en"
+
+            x: savedX
+            y: savedY
+            width:  expanded ? 750 : 100
+            height: expanded ? 680 : 100
+            z: 1000
+
+            Behavior on width  { NumberAnimation { duration: 150 } }
+            Behavior on height { NumberAnimation { duration: 150 } }
+
+            ; ── outer container ───────────────────────────────────────────
+            Rectangle {
+                anchors.fill: parent
+                color:        expanded ? "white" : "transparent"
+                border.color: "#333333"
+                border.width: expanded ? 2 : 0
+                radius: 10
+                clip:   true
+
+                ; ── header bar (drag + toggle) ────────────────────────────
+                Rectangle {
+                    id: panelHeader
+                    width:  parent.width
+                    height: 100
+                    color:  "#222222"
+                    radius: 10
+
+                    ; fill bottom corners so they look square against content
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        width:  parent.width
+                        height: 10
+                        color:  parent.color
+                    }
+
+                    Text {
+                        anchors.left:            parent.left
+                        anchors.leftMargin:      22
+                        anchors.verticalCenter:  parent.verticalCenter
+                        text:       translatePanel.expanded ? "Translate" : "T"
+                        color:      "white"
+                        font.pixelSize: 36
+                        font.bold:  true
+                    }
+
+                    ; close button — only visible when expanded
+                    Rectangle {
+                        visible:                 translatePanel.expanded
+                        anchors.right:           parent.right
+                        anchors.rightMargin:     18
+                        anchors.verticalCenter:  parent.verticalCenter
+                        width: 60; height: 60
+                        radius: 30
+                        color: "#555555"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text:  "×"
+                            color: "white"
+                            font.pixelSize: 34
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                translatePanel.expanded = false
+                                translatePanel.saveConfig()
+                            }
+                        }
+                    }
+
+                    ; drag + tap handler
+                    MouseArea {
+                        anchors.fill:        parent
+                        anchors.rightMargin: translatePanel.expanded ? 80 : 0
+
+                        property real pressX:    0
+                        property real pressY:    0
+                        property real startBoxX: 0
+                        property real startBoxY: 0
+                        property bool wasDrag:   false
+
+                        onPressed: function(mouse) {
+                            pressX    = mouse.x
+                            pressY    = mouse.y
+                            startBoxX = translatePanel.savedX
+                            startBoxY = translatePanel.savedY
+                            wasDrag   = false
+                        }
+
+                        onPositionChanged: function(mouse) {
+                            var dx = mouse.x - pressX
+                            var dy = mouse.y - pressY
+                            if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
+                                wasDrag = true
+                                translatePanel.savedX = startBoxX + dx
+                                translatePanel.savedY = startBoxY + dy
+                            }
+                        }
+
+                        onReleased: {
+                            if (!wasDrag) {
+                                translatePanel.expanded = !translatePanel.expanded
+                                if (translatePanel.expanded) {
+                                    translatePanel.loadConfig()
+                                }
+                            }
+                        }
+                    }
+                }
+
+                ; ── content area (only when expanded) ─────────────────────
+                Column {
+                    visible: translatePanel.expanded
+                    anchors {
+                        top:          panelHeader.bottom
+                        left:         parent.left
+                        right:        parent.right
+                        bottom:       parent.bottom
+                        margins:      15
+                        topMargin:    12
+                    }
+                    spacing: 10
+
+                    ; source-text input
+                    Rectangle {
+                        width:  parent.width
+                        height: 140
+                        border.color: "#aaaaaa"
+                        border.width: 1
+                        radius: 6
+
+                        TextEdit {
+                            id: sourceEditArea
+                            anchors.fill:    parent
+                            anchors.margins: 8
+                            text:     translatePanel.sourceText
+                            onTextChanged: translatePanel.sourceText = text
+                            wrapMode: TextEdit.Wrap
+                            font.pixelSize: 24
+                            color: "#111111"
+                        }
+                    }
+
+                    ; controls row
+                    Row {
+                        width:   parent.width
+                        spacing: 10
+
+                        Text {
+                            anchors.verticalCenter: parent.verticalCenter
+                            text:  "→"
+                            font.pixelSize: 28
+                            color: "#333333"
+                        }
+
+                        ; target-language toggle
+                        Rectangle {
+                            width: 140; height: 50
+                            border.color: "#aaaaaa"
+                            border.width: 1
+                            radius: 6
+
+                            Text {
+                                anchors.centerIn: parent
+                                text:  translatePanel.targetLang
+                                font.pixelSize: 22
+                                color: "#333333"
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: langDropdown.visible = !langDropdown.visible
+                            }
+                        }
+
+                        ; translate button
+                        Rectangle {
+                            width: 190; height: 50
+                            color:  translatePanel.loading ? "#888888" : "#222222"
+                            radius: 6
+
+                            Text {
+                                anchors.centerIn: parent
+                                text:  translatePanel.loading ? "Loading…" : "Translate"
+                                color: "white"
+                                font.pixelSize: 22
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                enabled: !translatePanel.loading
+                                onClicked: translatePanel.doTranslate(
+                                    translatePanel.sourceText,
+                                    translatePanel.targetLang
+                                )
+                            }
+                        }
+
+                        ; load-OCR button
+                        Rectangle {
+                            width: 140; height: 50
+                            color:  "#444444"
+                            radius: 6
+
+                            Text {
+                                anchors.centerIn: parent
+                                text:  "Load OCR"
+                                color: "white"
+                                font.pixelSize: 20
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                onClicked: translatePanel.loadPageOcr()
+                            }
+                        }
+                    }
+
+                    ; language picker dropdown
+                    Rectangle {
+                        id: langDropdown
+                        visible: false
+                        width:  parent.width
+                        height: langItemCol.implicitHeight + 10
+                        border.color: "#aaaaaa"
+                        border.width: 1
+                        radius: 6
+                        color: "white"
+                        z: 100
+
+                        Column {
+                            id: langItemCol
+                            anchors { top: parent.top; topMargin: 5 }
+                            width: parent.width
+
+                            Repeater {
+                                model: [
+                                    { code: "en",    name: "English"                  },
+                                    { code: "zh-CN", name: "Chinese (Simplified)"     },
+                                    { code: "zh-TW", name: "Chinese (Traditional)"    },
+                                    { code: "ja",    name: "Japanese"                 },
+                                    { code: "ko",    name: "Korean"                   },
+                                    { code: "es",    name: "Spanish"                  },
+                                    { code: "fr",    name: "French"                   },
+                                    { code: "de",    name: "German"                   },
+                                    { code: "it",    name: "Italian"                  },
+                                    { code: "pt",    name: "Portuguese"               },
+                                    { code: "ru",    name: "Russian"                  },
+                                    { code: "ar",    name: "Arabic"                   }
+                                ]
+
+                                delegate: Rectangle {
+                                    width:  langItemCol.width
+                                    height: 50
+                                    color: modelData.code === translatePanel.targetLang
+                                           ? "#e0e0e0" : "transparent"
+
+                                    Text {
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        anchors.left:           parent.left
+                                        anchors.leftMargin:     14
+                                        text: modelData.name + "  (" + modelData.code + ")"
+                                        font.pixelSize: 22
+                                        color: "#222222"
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        onClicked: {
+                                            translatePanel.targetLang = modelData.code
+                                            langDropdown.visible = false
+                                            translatePanel.saveConfig()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    ; translation result
+                    Rectangle {
+                        visible: translatePanel.result !== "" || translatePanel.loading
+                        width:   parent.width
+                        height:  200
+                        border.color: "#cccccc"
+                        border.width: 1
+                        radius: 6
+                        color: "#f8f8f8"
+
+                        Flickable {
+                            anchors.fill:    parent
+                            anchors.margins: 10
+                            clip: true
+                            contentHeight: resultText.implicitHeight
+
+                            Text {
+                                id: resultText
+                                width:    parent.width
+                                text:     translatePanel.loading
+                                          ? "Translating…"
+                                          : translatePanel.result
+                                font.pixelSize: 24
+                                color: translatePanel.loading ? "#666666" : "#111111"
+                                wrapMode: Text.Wrap
+                            }
+                        }
+                    }
+                }
+            }
+
+            ; ── functions ─────────────────────────────────────────────────
+
+            function doTranslate(text, lang) {
+                if (!text || text.trim() === "") return
+                loading = true
+                result  = ""
+                var xhr = new XMLHttpRequest()
+                var url = "https://translate.googleapis.com/translate_a/single"
+                        + "?client=gtx"
+                        + "&sl=auto"
+                        + "&tl="  + encodeURIComponent(lang)
+                        + "&dt=t"
+                        + "&q="   + encodeURIComponent(text)
+                xhr.open("GET", url)
+                xhr.onreadystatechange = function() {
+                    if (xhr.readyState !== XMLHttpRequest.DONE) return
+                    loading = false
+                    if (xhr.status === 200) {
+                        try {
+                            var res = JSON.parse(xhr.responseText)
+                            var out = ""
+                            for (var i = 0; i < res[0].length; i++) {
+                                if (res[0][i] && res[0][i][0]) out += res[0][i][0]
+                            }
+                            result = out
+                        } catch (e) {
+                            result = "Error: could not parse translation response. " + e.message
+                        }
+                    } else {
+                        result = "Error: HTTP " + xhr.status
+                               + ". Check network connection."
+                    }
+                }
+                xhr.send()
+            }
+
+            function loadPageOcr() {
+                sourceText = ""
+                var confXhr = new XMLHttpRequest()
+                confXhr.open("GET",
+                    "file:///home/root/.config/remarkable/xochitl.conf")
+                confXhr.onreadystatechange = function() {
+                    if (confXhr.readyState !== XMLHttpRequest.DONE) return
+                    if (confXhr.status !== 200) {
+                        sourceText = "Error: could not read xochitl.conf (status "
+                                   + confXhr.status + ")"
+                        return
+                    }
+                    var docId   = ""
+                    var pageNum = 0
+                    var lines   = confXhr.responseText.split("\n")
+                    for (var i = 0; i < lines.length; i++) {
+                        var ln = lines[i].trim()
+                        if (ln.indexOf("CurrentDocumentId=") === 0)
+                            docId   = ln.substring("CurrentDocumentId=".length).trim()
+                        if (ln.indexOf("CurrentDocumentPageNumber=") === 0)
+                            pageNum = parseInt(
+                                ln.substring("CurrentDocumentPageNumber=".length)) || 0
+                    }
+                    if (!docId) {
+                        sourceText = "Error: no open document found in xochitl.conf"
+                        return
+                    }
+                    var ocrXhr = new XMLHttpRequest()
+                    ocrXhr.open("GET",
+                        "file:///home/root/.local/share/remarkable/xochitl/"
+                        + docId + ".textconversion")
+                    ocrXhr.onreadystatechange = function() {
+                        if (ocrXhr.readyState !== XMLHttpRequest.DONE) return
+                        if (ocrXhr.status !== 200) {
+                            sourceText = "Error: OCR data not found for this document. "
+                                       + "Make sure handwriting-to-text conversion is enabled."
+                            return
+                        }
+                        try {
+                            var data = JSON.parse(ocrXhr.responseText)
+                            if (data && typeof data.text === "string") {
+                                sourceText = data.text
+                            } else if (data && Array.isArray(data.pages)) {
+                                var pg = data.pages[pageNum]
+                                sourceText = pg ? (pg.text || "") : ""
+                            } else {
+                                sourceText = "Error: unrecognised OCR format."
+                            }
+                        } catch (e) {
+                            sourceText = "Error: failed to parse OCR data. " + e.message
+                        }
+                    }
+                    ocrXhr.send()
+                }
+                confXhr.send()
+            }
+
+            function loadConfig() {
+                var xhr = new XMLHttpRequest()
+                xhr.open("GET",
+                    "file:///home/root/.config/translate-plugin.json")
+                xhr.onreadystatechange = function() {
+                    if (xhr.readyState !== XMLHttpRequest.DONE) return
+                    if (xhr.status !== 200) return   ; first-run: no config file yet
+                    try {
+                        var cfg = JSON.parse(xhr.responseText)
+                        if (cfg.targetLang)        targetLang = cfg.targetLang
+                        if (cfg.x !== undefined)   savedX = cfg.x
+                        if (cfg.y !== undefined)   savedY = cfg.y
+                    } catch (e) {
+                        console.log("TranslatePlugin: config parse error: " + e.message)
+                    }
+                }
+                xhr.send()
+            }
+
+            function saveConfig() {
+                var xhr = new XMLHttpRequest()
+                xhr.open("PUT",
+                    "file:///home/root/.config/translate-plugin.json")
+                xhr.onreadystatechange = function() {
+                    if (xhr.readyState !== XMLHttpRequest.DONE) return
+                    if (xhr.status !== 200 && xhr.status !== 0) {
+                        console.log("TranslatePlugin: failed to save config, status: "
+                                    + xhr.status)
+                    }
+                }
+                xhr.send(JSON.stringify({
+                    targetLang: targetLang,
+                    x:          savedX,
+                    y:          savedY
+                }))
+            }
+
+            Component.onCompleted: loadConfig()
+        }
+    }
+    END TRAVERSE
+END AFFECT
