@@ -1,707 +1,1105 @@
-; translate.qmd — Page Translator for reMarkable
-;
-; Adds a draggable floating translation box to xochitl's document view.
-; Tap the "T" button to expand/collapse the panel. Drag the header bar to
-; move it. Tap "Load Text" to populate the source-text field:
-;   • PDFs  — text is extracted directly from the PDF's embedded text layer
-;             (no OCR required; works for any digitally-created PDF).
-;   • Notebooks / ePubs — uses xochitl's handwriting-to-text conversion
-;             (.textconversion file).
-; Then choose a target language and tap "Translate" to call the Google
-; Translate API.
-;
-; Compatibility : xochitl 3.25 (hash selectors taken from FouzR/floating.qmd 3.25)
-;                 xochitl 3.26 may work unchanged — see README for details.
-; Depends       : qt-resource-rebuilder
-; Install path  : /home/root/xovi/exthome/qt-resource-rebuilder/translate.qmd
-;
-; ─────────────────────────────────────────────────────────────────────────────
-; AFFECT selectors (hashes) are taken from the document-view component that
-; the floating toolbar also targets (3.25/floating.qmd in FouzR/xovi-extensions).
-; The INSERT blocks use plain QML/JS — new identifiers never appear in the
-; hashtable and therefore do not need to be hashed.
-; ─────────────────────────────────────────────────────────────────────────────
+; translate.qmd - toolbar button plus safe overlay panel shell
+; ASCII only: qmldiff on-device ignored UTF-8 content previously.
 
-AFFECT [[6722609618937832156]]
-    TRAVERSE [[233699089663818]]#[[6504254477]]
-    LOCATE AFTER ALL
-    INSERT {
-        Item {
-            id: translatePanel
+AFFECT [[11313888899523275277]]
+    TRAVERSE [[8397993708429497603]]#[[6504254477]]
+        LOCATE BEFORE ALL
+        INSERT {
+            property bool translatePanelVisible: false
+            property real translatePanelX: 60
+            property real translatePanelY: 120
+        }
 
-            ; ── persisted position and state ──────────────────────────────
-            property var  savedX: 60
-            property var  savedY: 120
-            property bool expanded:   false
-            property bool loading:    false
-            property string result:   ""
-            property string sourceText: ""
-            property string targetLang: "en"
+        TRAVERSE [[6502786168]]#[[233745975898428]] > [[8398044571386570029]]
+            LOCATE BEFORE [[7712155293725601]][.[[8399878573055752961]]=[["3575461827597527778]]]
+            INSERT {
+                ~&454089850271038938&~ {
+                    ~&5972374&~: translateToggleButton
+                    ~&233745975898428&~: ~&6504254477&~
+                    ~&6504337259&~: ~&454089850271038938&~.~&6503187275&~.~&14888501028015932088&~
 
-            x: savedX
-            y: savedY
-            width:  expanded ? 750 : 100
-            height: expanded ? 680 : 100
-            z: 1000
+                    ~&7713561545874130&~: ~&6504254477&~.translatePanelVisible
+                    ~&8399601734642709923&~: ~&"5204540755240042894&~
+                    ~&233726547792244&~: ~&6504329801&~
+                    ~&233748328658231&~: !!~&7712934851008712&~ && ~&6504254477&~.~&7712989577739634&~ && ~&6504254477&~.~&4367731859579753176&~ > 7
+                    ~&214641332312&~: !!~&7712934851008712&~ && ~&6504254477&~.~&4367731859579753176&~ > 7
 
-            Behavior on width  { NumberAnimation { duration: 150 } }
-            Behavior on height { NumberAnimation { duration: 150 } }
+                    ~&254542253295368380&~: {
+                        ~&6504254477&~.translatePanelVisible = !~&6504254477&~.translatePanelVisible;
+                    }
+                }
+            }
+        END TRAVERSE
+    END TRAVERSE
+END AFFECT
 
-            ; ── outer container ───────────────────────────────────────────
-            Rectangle {
-                anchors.fill: parent
-                color:        expanded ? "white" : "transparent"
-                border.color: "#333333"
-                border.width: expanded ? 2 : 0
-                radius: 10
-                clip:   true
+AFFECT [[1224665461898798997]]
+    IMPORT net.asivery.CommandExecutor 1.0
+    TRAVERSE [[8397993708429497603]] > [[6502786168]]#[[15549782143769420265]]
+        LOCATE AFTER [[233704648923420]]
+        INSERT {
+            Item {
+                id: translatePanel
+                visible: ~&233745975898428&~.translatePanelVisible
+                x: ~&233745975898428&~.translatePanelX
+                y: ~&233745975898428&~.translatePanelY
+                width: 760
+                height: bodyVisible ? 700 : 106
+                z: 1000
 
-                ; ── header bar (drag + toggle) ────────────────────────────
-                Rectangle {
-                    id: panelHeader
-                    width:  parent.width
-                    height: 100
-                    color:  "#222222"
-                    radius: 10
+                property bool bodyVisible: true
+                property bool loading: false
+                property string sourceText: ""
+                property string translatedText: ""
+                property string sourceLang: "auto"
+                property string targetLang: "en"
+                property bool translateAfterLoad: false
+                property var sourceLangs: [
+                    { code: "auto", label: "Auto" },
+                    { code: "ko", label: "KR" },
+                    { code: "zh-CN", label: "CN" },
+                    { code: "en", label: "EN" }
+                ]
+                property var targetLangs: [
+                    { code: "ko", label: "KR" },
+                    { code: "zh-CN", label: "CN" },
+                    { code: "en", label: "EN" }
+                ]
 
-                    ; fill bottom corners so they look square against content
-                    Rectangle {
-                        anchors.bottom: parent.bottom
-                        width:  parent.width
-                        height: 10
-                        color:  parent.color
+                CommandExecutor {
+                    id: translateCommandExecutor
+                }
+
+                function normalizeDisplayText(newText) {
+                    var lines = (newText || "").replace(/\r/g, "\n").split("\n")
+                    var out = ""
+                    var pendingBreak = false
+                    var i = 0
+
+                    while (i < lines.length) {
+                        var line = translatePanel.trimString(lines[i])
+                        if (!line.length) {
+                            if (out.length > 0)
+                                pendingBreak = true
+                            i++
+                            continue
+                        }
+
+                        if (!out.length) {
+                            out = line
+                            pendingBreak = false
+                            i++
+                            continue
+                        }
+
+                        if (pendingBreak) {
+                            out += "\n\n" + line
+                            pendingBreak = false
+                            i++
+                            continue
+                        }
+
+                        var prevChar = out[out.length - 1]
+                        var nextChar = line[0]
+                        if (translatePanel.isSentenceBreakChar(prevChar)) {
+                            out += "\n" + line
+                        } else {
+                            out += translatePanel.chooseInlineJoiner(prevChar, nextChar) + line
+                        }
+                        i++
                     }
 
-                    Text {
-                        anchors.left:            parent.left
-                        anchors.leftMargin:      22
-                        anchors.verticalCenter:  parent.verticalCenter
-                        text:       translatePanel.expanded ? "Translate" : "T"
-                        color:      "white"
-                        font.pixelSize: 36
-                        font.bold:  true
+                    while (out.indexOf("\n\n\n") !== -1)
+                        out = out.replace("\n\n\n", "\n\n")
+                    return out
+                }
+
+                function isSentenceBreakChar(ch) {
+                    if (!ch || !ch.length) return false
+                    var code = ch.charCodeAt(0)
+                    return ch === "." || ch === "!" || ch === "?" ||
+                           code === 12290 || code === 65281 || code === 65311
+                }
+
+                function isTightJoinChar(ch) {
+                    return ch === "," || ch === "." || ch === "!" || ch === "?" ||
+                           ch === ":" || ch === ";" || ch === ")" || ch === "]" ||
+                           ch === "}" || ch === "\"" || ch === "'" || ch === "%"
+                }
+
+                function chooseInlineJoiner(prevChar, nextChar) {
+                    if (!prevChar || !nextChar) return " "
+                    if (prevChar === "-") return ""
+                    if (translatePanel.isTightJoinChar(nextChar)) return ""
+                    return " "
+                }
+
+                function setSourceText(newText) {
+                    sourceText = normalizeDisplayText(newText)
+                }
+
+                function setTranslatedText(newText) {
+                    translatedText = normalizeDisplayText(newText)
+                }
+
+                function sourceLangLabel() {
+                    var i = 0
+                    while (i < sourceLangs.length) {
+                        if (sourceLangs[i].code === sourceLang)
+                            return sourceLangs[i].label
+                        i++
                     }
+                    return sourceLang
+                }
 
-                    ; close button — only visible when expanded
-                    Rectangle {
-                        visible:                 translatePanel.expanded
-                        anchors.right:           parent.right
-                        anchors.rightMargin:     18
-                        anchors.verticalCenter:  parent.verticalCenter
-                        width: 60; height: 60
-                        radius: 30
-                        color: "#555555"
-
-                        Text {
-                            anchors.centerIn: parent
-                            text:  "×"
-                            color: "white"
-                            font.pixelSize: 34
+                function cycleSourceLang() {
+                    var i = 0
+                    while (i < sourceLangs.length) {
+                        if (sourceLangs[i].code === sourceLang) {
+                            sourceLang = sourceLangs[(i + 1) % sourceLangs.length].code
+                            saveConfig()
+                            return
                         }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                translatePanel.expanded = false
-                                translatePanel.saveConfig()
-                            }
-                        }
+                        i++
                     }
+                    sourceLang = "auto"
+                    saveConfig()
+                }
 
-                    ; drag + tap handler
-                    MouseArea {
-                        anchors.fill:        parent
-                        anchors.rightMargin: translatePanel.expanded ? 80 : 0
+                function setLoadError(message) {
+                    translateAfterLoad = false
+                    loading = false
+                    setSourceText(message || "")
+                    setTranslatedText("")
+                }
 
-                        property real pressX:    0
-                        property real pressY:    0
-                        property real startBoxX: 0
-                        property real startBoxY: 0
-                        property bool wasDrag:   false
-
-                        onPressed: function(mouse) {
-                            pressX    = mouse.x
-                            pressY    = mouse.y
-                            startBoxX = translatePanel.savedX
-                            startBoxY = translatePanel.savedY
-                            wasDrag   = false
-                        }
-
-                        onPositionChanged: function(mouse) {
-                            var dx = mouse.x - pressX
-                            var dy = mouse.y - pressY
-                            if (Math.abs(dx) > 8 || Math.abs(dy) > 8) {
-                                wasDrag = true
-                                translatePanel.savedX = startBoxX + dx
-                                translatePanel.savedY = startBoxY + dy
-                            }
-                        }
-
-                        onReleased: {
-                            if (!wasDrag) {
-                                translatePanel.expanded = !translatePanel.expanded
-                                if (translatePanel.expanded) {
-                                    translatePanel.loadConfig()
-                                }
-                            }
-                        }
+                function applyLoadedText(newText) {
+                    setSourceText(newText || "")
+                    if (translateAfterLoad) {
+                        translateAfterLoad = false
+                        doTranslateText(sourceText)
+                    } else {
+                        loading = false
                     }
                 }
 
-                ; ── content area (only when expanded) ─────────────────────
-                Column {
-                    visible: translatePanel.expanded
-                    anchors {
-                        top:          panelHeader.bottom
-                        left:         parent.left
-                        right:        parent.right
-                        bottom:       parent.bottom
-                        margins:      15
-                        topMargin:    12
+                function refreshTranslation() {
+                    if (loading) return
+                    translateAfterLoad = true
+                    loadPageText()
+                }
+
+                function targetLangLabel() {
+                    var i = 0
+                    while (i < targetLangs.length) {
+                        if (targetLangs[i].code === targetLang)
+                            return targetLangs[i].label
+                        i++
                     }
-                    spacing: 10
+                    return targetLang
+                }
 
-                    ; source-text input
-                    Rectangle {
-                        width:  parent.width
-                        height: 140
-                        border.color: "#aaaaaa"
-                        border.width: 1
-                        radius: 6
+                function cycleTargetLang() {
+                    var i = 0
+                    while (i < targetLangs.length) {
+                        if (targetLangs[i].code === targetLang) {
+                            targetLang = targetLangs[(i + 1) % targetLangs.length].code
+                            saveConfig()
+                            return
+                        }
+                        i++
+                    }
+                    targetLang = "en"
+                    saveConfig()
+                }
 
-                        TextEdit {
-                            id: sourceEditArea
-                            anchors.fill:    parent
-                            anchors.margins: 8
-                            text:     translatePanel.sourceText
-                            onTextChanged: translatePanel.sourceText = text
-                            wrapMode: TextEdit.Wrap
-                            font.pixelSize: 24
-                            color: "#111111"
+                function byteAt(data, idx) {
+                    return data.charCodeAt(idx) & 255
+                }
+
+                function readU16BE(data, idx) {
+                    return (translatePanel.byteAt(data, idx) * 256)
+                         + translatePanel.byteAt(data, idx + 1)
+                }
+
+                function readUtf16BeString(data, startIdx, endIdx) {
+                    var out = ""
+                    var i = startIdx
+                    while (i + 1 < endIdx) {
+                        var code = translatePanel.readU16BE(data, i)
+                        if (code === 0) break
+                        out += String.fromCharCode(code)
+                        i += 2
+                    }
+                    return out
+                }
+
+                Rectangle {
+                    anchors.fill: parent
+                    color: "white"
+                    border.color: "black"
+                    border.width: 2
+                    radius: 10
+                    clip: true
+                }
+
+                Rectangle {
+                    id: translateHeader
+                    width: parent.width
+                    height: 90
+                    color: "black"
+                    radius: 10
+
+                    MouseArea {
+                        anchors.fill: parent
+                        anchors.rightMargin: 320
+
+                        property real pressX: 0
+                        property real pressY: 0
+                        property real startPanelX: 0
+                        property real startPanelY: 0
+
+                        onPressed: function(mouse) {
+                            pressX = mouse.x
+                            pressY = mouse.y
+                            startPanelX = ~&233745975898428&~.translatePanelX
+                            startPanelY = ~&233745975898428&~.translatePanelY
+                        }
+
+                        onPositionChanged: function(mouse) {
+                            ~&233745975898428&~.translatePanelX = startPanelX + (mouse.x - pressX)
+                            ~&233745975898428&~.translatePanelY = startPanelY + (mouse.y - pressY)
+                        }
+
+                        onReleased: {
+                            translatePanel.saveConfig()
                         }
                     }
 
-                    ; controls row
+                    Rectangle {
+                        anchors.bottom: parent.bottom
+                        width: parent.width
+                        height: 12
+                        color: parent.color
+                    }
+
+                    Text {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 18
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: "Translate"
+                        color: "white"
+                        font.pixelSize: 34
+                        font.bold: true
+                    }
+
                     Row {
-                        width:   parent.width
+                        anchors.right: foldButton.left
+                        anchors.rightMargin: 12
+                        anchors.verticalCenter: parent.verticalCenter
                         spacing: 10
 
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            text:  "→"
-                            font.pixelSize: 28
-                            color: "#333333"
-                        }
-
-                        ; target-language toggle
                         Rectangle {
-                            width: 140; height: 50
-                            border.color: "#aaaaaa"
-                            border.width: 1
+                            width: 140
+                            height: 56
+                            color: "black"
                             radius: 6
 
                             Text {
                                 anchors.centerIn: parent
-                                text:  translatePanel.targetLang
-                                font.pixelSize: 22
-                                color: "#333333"
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                onClicked: langDropdown.visible = !langDropdown.visible
-                            }
-                        }
-
-                        ; translate button
-                        Rectangle {
-                            width: 190; height: 50
-                            color:  translatePanel.loading ? "#888888" : "#222222"
-                            radius: 6
-
-                            Text {
-                                anchors.centerIn: parent
-                                text:  translatePanel.loading ? "Loading…" : "Translate"
+                                text: "To: " + translatePanel.targetLangLabel()
                                 color: "white"
-                                font.pixelSize: 22
+                                font.pixelSize: 24
                             }
 
                             MouseArea {
                                 anchors.fill: parent
                                 enabled: !translatePanel.loading
-                                onClicked: translatePanel.doTranslate(
-                                    translatePanel.sourceText,
-                                    translatePanel.targetLang
-                                )
+                                onClicked: {
+                                    translatePanel.cycleTargetLang()
+                                }
                             }
                         }
 
-                        ; load-text button (PDF text layer or OCR fallback)
                         Rectangle {
-                            width: 140; height: 50
-                            color:  "#444444"
+                            width: 160
+                            height: 56
+                            color: "black"
                             radius: 6
 
                             Text {
                                 anchors.centerIn: parent
-                                text:  "Load Text"
+                                text: translatePanel.loading ? "Working..." : "Refresh"
                                 color: "white"
-                                font.pixelSize: 20
+                                font.pixelSize: 24
                             }
 
                             MouseArea {
                                 anchors.fill: parent
-                                onClicked: translatePanel.loadPageText()
-                            }
-                        }
-                    }
-
-                    ; language picker dropdown
-                    Rectangle {
-                        id: langDropdown
-                        visible: false
-                        width:  parent.width
-                        height: langItemCol.implicitHeight + 10
-                        border.color: "#aaaaaa"
-                        border.width: 1
-                        radius: 6
-                        color: "white"
-                        z: 100
-
-                        Column {
-                            id: langItemCol
-                            anchors { top: parent.top; topMargin: 5 }
-                            width: parent.width
-
-                            Repeater {
-                                model: [
-                                    { code: "en",    name: "English"                  },
-                                    { code: "zh-CN", name: "Chinese (Simplified)"     },
-                                    { code: "zh-TW", name: "Chinese (Traditional)"    },
-                                    { code: "ja",    name: "Japanese"                 },
-                                    { code: "ko",    name: "Korean"                   },
-                                    { code: "es",    name: "Spanish"                  },
-                                    { code: "fr",    name: "French"                   },
-                                    { code: "de",    name: "German"                   },
-                                    { code: "it",    name: "Italian"                  },
-                                    { code: "pt",    name: "Portuguese"               },
-                                    { code: "ru",    name: "Russian"                  },
-                                    { code: "ar",    name: "Arabic"                   }
-                                ]
-
-                                delegate: Rectangle {
-                                    width:  langItemCol.width
-                                    height: 50
-                                    color: modelData.code === translatePanel.targetLang
-                                           ? "#e0e0e0" : "transparent"
-
-                                    Text {
-                                        anchors.verticalCenter: parent.verticalCenter
-                                        anchors.left:           parent.left
-                                        anchors.leftMargin:     14
-                                        text: modelData.name + "  (" + modelData.code + ")"
-                                        font.pixelSize: 22
-                                        color: "#222222"
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: {
-                                            translatePanel.targetLang = modelData.code
-                                            langDropdown.visible = false
-                                            translatePanel.saveConfig()
-                                        }
-                                    }
+                                enabled: !translatePanel.loading
+                                onClicked: {
+                                    translatePanel.refreshTranslation()
                                 }
                             }
                         }
                     }
 
-                    ; translation result
                     Rectangle {
-                        visible: translatePanel.result !== "" || translatePanel.loading
-                        width:   parent.width
-                        height:  200
-                        border.color: "#cccccc"
-                        border.width: 1
+                        id: foldButton
+                        anchors.top: parent.top
+                        anchors.right: parent.right
+                        anchors.topMargin: 16
+                        anchors.rightMargin: 18
+                        width: 60
+                        height: 60
+                        radius: 30
+                        color: "black"
+
+                        Item {
+                            anchors.centerIn: parent
+                            width: 24
+                            height: 16
+                            rotation: translatePanel.bodyVisible ? 180 : 0
+
+                            Rectangle {
+                                width: 14
+                                height: 4
+                                radius: 2
+                                color: "white"
+                                anchors.left: parent.left
+                                anchors.bottom: parent.bottom
+                                rotation: 35
+                                transformOrigin: Item.Left
+                            }
+
+                            Rectangle {
+                                width: 14
+                                height: 4
+                                radius: 2
+                                color: "white"
+                                anchors.right: parent.right
+                                anchors.bottom: parent.bottom
+                                rotation: -35
+                                transformOrigin: Item.Right
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                translatePanel.bodyVisible = !translatePanel.bodyVisible
+                                translatePanel.saveConfig()
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        width: 110
+                        height: 12
+                        color: parent.color
+                    }
+                }
+
+                Column {
+                    id: translateBody
+                    visible: translatePanel.bodyVisible
+                    anchors.top: translateHeader.bottom
+                    anchors.topMargin: 14
+                    anchors.left: parent.left
+                    anchors.right: parent.right
+                    anchors.bottom: parent.bottom
+                    anchors.leftMargin: 16
+                    anchors.rightMargin: 16
+                    anchors.bottomMargin: 16
+                    spacing: 10
+
+                    Rectangle {
+                        width: parent.width
+                        height: parent.height
+                        color: "white"
+                        border.width: 0
                         radius: 6
-                        color: "#f8f8f8"
 
                         Flickable {
-                            anchors.fill:    parent
+                            anchors.fill: parent
                             anchors.margins: 10
                             clip: true
-                            contentHeight: resultText.implicitHeight
+                            contentWidth: width
+                            contentHeight: resultTextItem.paintedHeight
 
                             Text {
-                                id: resultText
-                                width:    parent.width
-                                text:     translatePanel.loading
-                                          ? "Translating…"
-                                          : translatePanel.result
-                                font.pixelSize: 24
-                                color: translatePanel.loading ? "#666666" : "#111111"
+                                id: resultTextItem
+                                width: parent.width
+                                text: translatePanel.translatedText
                                 wrapMode: Text.Wrap
+                                font.pixelSize: 24
+                                color: "black"
                             }
                         }
                     }
                 }
-            }
 
-            ; ── functions ─────────────────────────────────────────────────
+                function loadPageText() {
+                    loading = true
+                    setSourceText("")
+                    setTranslatedText("")
+                    var confXhr = new XMLHttpRequest()
+                    confXhr.open("GET", "file:///home/root/.config/remarkable/xochitl.conf")
+                    confXhr.onreadystatechange = function() {
+                        if (confXhr.readyState !== XMLHttpRequest.DONE) return
+                        if (confXhr.status !== 200) {
+                            setLoadError("Error: could not read xochitl.conf (status " + confXhr.status + ")")
+                            return
+                        }
 
-            function doTranslate(text, lang) {
-                if (!text || text.trim() === "") return
-                loading = true
-                result  = ""
-                var xhr = new XMLHttpRequest()
-                var url = "https://translate.googleapis.com/translate_a/single"
-                        + "?client=gtx"
-                        + "&sl=auto"
-                        + "&tl="  + encodeURIComponent(lang)
-                        + "&dt=t"
-                        + "&q="   + encodeURIComponent(text)
-                xhr.open("GET", url)
-                xhr.onreadystatechange = function() {
-                    if (xhr.readyState !== XMLHttpRequest.DONE) return
-                    loading = false
-                    if (xhr.status === 200) {
-                        try {
-                            var res = JSON.parse(xhr.responseText)
-                            var out = ""
-                            for (var i = 0; i < res[0].length; i++) {
-                                if (res[0][i] && res[0][i][0]) out += res[0][i][0]
+                        var docId = ""
+                        var lines = confXhr.responseText.split("\n")
+                        var i = 0
+                        while (i < lines.length) {
+                            var ln = lines[i].trim()
+                            if (ln.indexOf("LastOpen=") === 0)
+                                docId = ln.substring("LastOpen=".length).trim()
+                            if (!docId && ln.indexOf("CurrentDocumentId=") === 0)
+                                docId = ln.substring("CurrentDocumentId=".length).trim()
+                            i++
+                        }
+
+                        if (!docId) {
+                            setLoadError("Error: no open document found in xochitl.conf")
+                            return
+                        }
+
+                        var metaPageXhr = new XMLHttpRequest()
+                        metaPageXhr.open("GET",
+                            "file:///home/root/.local/share/remarkable/xochitl/" + docId + ".metadata")
+                        metaPageXhr.onreadystatechange = function() {
+                            if (metaPageXhr.readyState !== XMLHttpRequest.DONE) return
+                            var pageNum = 0
+                            if (metaPageXhr.status === 200) {
+                                try {
+                                    var pageMeta = JSON.parse(metaPageXhr.responseText)
+                                    if (pageMeta && typeof pageMeta.lastOpenedPage === "number")
+                                        pageNum = pageMeta.lastOpenedPage
+                                } catch (e) {}
                             }
-                            result = out
-                        } catch (e) {
-                            result = "Error: could not parse translation response. " + e.message
-                        }
-                    } else {
-                        result = "Error: HTTP " + xhr.status
-                               + ". Check network connection."
-                    }
-                }
-                xhr.send()
-            }
 
-            function loadPageText() {
-                sourceText = ""
-                var confXhr = new XMLHttpRequest()
-                confXhr.open("GET",
-                    "file:///home/root/.config/remarkable/xochitl.conf")
-                confXhr.onreadystatechange = function() {
-                    if (confXhr.readyState !== XMLHttpRequest.DONE) return
-                    if (confXhr.status !== 200) {
-                        sourceText = "Error: could not read xochitl.conf (status "
-                                   + confXhr.status + ")"
-                        return
-                    }
-                    var docId   = ""
-                    var pageNum = 0
-                    var lines   = confXhr.responseText.split("\n")
-                    for (var i = 0; i < lines.length; i++) {
-                        var ln = lines[i].trim()
-                        if (ln.indexOf("CurrentDocumentId=") === 0)
-                            docId   = ln.substring("CurrentDocumentId=".length).trim()
-                        if (ln.indexOf("CurrentDocumentPageNumber=") === 0)
-                            pageNum = parseInt(
-                                ln.substring("CurrentDocumentPageNumber=".length)) || 0
-                    }
-                    if (!docId) {
-                        sourceText = "Error: no open document found in xochitl.conf"
-                        return
-                    }
-                    ; Read .content metadata to determine file type (pdf / notebook / epub)
-                    var metaXhr = new XMLHttpRequest()
-                    metaXhr.open("GET",
-                        "file:///home/root/.local/share/remarkable/xochitl/"
-                        + docId + ".content")
-                    metaXhr.onreadystatechange = function() {
-                        if (metaXhr.readyState !== XMLHttpRequest.DONE) return
-                        var fileType = "notebook"
-                        if (metaXhr.status === 200) {
-                            try {
-                                var meta = JSON.parse(metaXhr.responseText)
-                                fileType = meta.fileType || "notebook"
-                            } catch (e) {}
-                        }
-                        if (fileType === "pdf") {
-                            loadPdfText(docId, pageNum)
-                        } else {
-                            loadTextConversion(docId, pageNum)
-                        }
-                    }
-                    metaXhr.send()
-                }
-                confXhr.send()
-            }
-
-            ; ── PDF text extraction ────────────────────────────────────────
-            ; Reads the PDF binary and extracts text using the standard
-            ; BT…ET text operator blocks.  Works for all digitally-created
-            ; PDFs (Word, LaTeX, LibreOffice, etc.) without needing OCR.
-            ; Scanned-image PDFs have no embedded text layer and will fall
-            ; through to the .textconversion OCR fallback.
-
-            function loadPdfText(docId, pageNum) {
-                var pdfXhr = new XMLHttpRequest()
-                pdfXhr.open("GET",
-                    "file:///home/root/.local/share/remarkable/xochitl/"
-                    + docId + ".pdf")
-                pdfXhr.onreadystatechange = function() {
-                    if (pdfXhr.readyState !== XMLHttpRequest.DONE) return
-                    if (pdfXhr.status !== 200) {
-                        ; PDF file not accessible — fall back to OCR conversion
-                        loadTextConversion(docId, pageNum)
-                        return
-                    }
-                    var extracted = extractPdfPageText(pdfXhr.responseText, pageNum)
-                    if (extracted && extracted.trim().length > 0) {
-                        sourceText = extracted
-                    } else {
-                        ; No readable text layer found (scanned PDF?) — try OCR fallback
-                        loadTextConversion(docId, pageNum)
-                    }
-                }
-                pdfXhr.send()
-            }
-
-            ; extractPdfPageText(pdfData, pageNum)
-            ;   Parses PDF text streams from BT … ET blocks.
-            ;   Tries to isolate the target page by counting /Type /Page objects
-            ;   in the file to determine approximate page boundaries.
-            ;   Falls back to returning all text when page isolation is not possible.
-            function extractPdfPageText(pdfData, pageNum) {
-                ; Collect byte-offsets of /Type /Page declarations so we can
-                ; roughly map content streams to individual pages.
-                var pageOffsets = []
-                var searchPos   = 0
-                var MARKER      = "/Type /Page"
-                while (true) {
-                    var pp = pdfData.indexOf(MARKER, searchPos)
-                    if (pp === -1) break
-                    pageOffsets.push(pp)
-                    searchPos = pp + MARKER.length
-                }
-
-                ; Collect all BT…ET text blocks with their start offset
-                var blocks    = []
-                var pos       = 0
-                var SAFE      = 100000  ; max loop iterations (~1 BT/ET block per iteration)
-                var iters     = 0
-                while (pos < pdfData.length && iters < SAFE) {
-                    iters++
-                    var btIdx = pdfData.indexOf("BT", pos)
-                    if (btIdx === -1) break
-                    ; BT must be surrounded by whitespace
-                    var cb = btIdx > 0 ? pdfData[btIdx - 1] : "\n"
-                    var ca = pdfData[btIdx + 2]
-                    if (" \n\r".indexOf(cb) === -1 || " \n\r".indexOf(ca) === -1) {
-                        pos = btIdx + 2
-                        continue
-                    }
-                    var etIdx = pdfData.indexOf("ET", btIdx + 2)
-                    if (etIdx === -1) break
-                    var cbe = etIdx > 0 ? pdfData[etIdx - 1] : "\n"
-                    var cae = etIdx + 2 < pdfData.length ? pdfData[etIdx + 2] : "\n"
-                    if (" \n\r".indexOf(cbe) === -1 || " \n\r".indexOf(cae) === -1) {
-                        pos = btIdx + 2
-                        continue
-                    }
-                    blocks.push({ offset: btIdx, content: pdfData.substring(btIdx + 2, etIdx) })
-                    pos = etIdx + 2
-                }
-
-                if (blocks.length === 0) return ""
-
-                ; Filter blocks to those between this page's /Type /Page marker
-                ; and the next one.  If page isolation is not possible use all blocks.
-                var targetBlocks = blocks
-                if (pageOffsets.length > 0) {
-                    var pgStart = pageOffsets[pageNum] !== undefined
-                                  ? pageOffsets[pageNum] : pageOffsets[0]
-                    var pgEnd   = pageOffsets[pageNum + 1] !== undefined
-                                  ? pageOffsets[pageNum + 1] : pdfData.length
-                    var filtered = blocks.filter(function(b) {
-                        return b.offset >= pgStart && b.offset < pgEnd
-                    })
-                    if (filtered.length > 0) targetBlocks = filtered
-                }
-
-                ; Extract text from each block
-                var result = ""
-                for (var bi = 0; bi < targetBlocks.length; bi++) {
-                    result += parsePdfTextBlock(targetBlocks[bi].content)
-                }
-                return result.trim()
-            }
-
-            ; parsePdfTextBlock(block)
-            ;   Extracts human-readable text from a single BT…ET block.
-            ;   Handles: (str) Tj   [(str) num] TJ   (str) '   (str) "
-            ;   and Td / TD / T* newline operators.
-            function parsePdfTextBlock(block) {
-                var text = ""
-                var i    = 0
-                while (i < block.length) {
-                    var ch = block[i]
-
-                    ; Literal string: ( … )
-                    if (ch === "(") {
-                        var end = i + 1
-                        while (end < block.length) {
-                            if (block[end] === "\\" && end + 1 < block.length) {
-                                end += 2
-                                continue
-                            }
-                            if (block[end] === ")") break
-                            end++
-                        }
-                        var str = block.substring(i + 1, end)
-                        ; Decode common PDF escape sequences
-                        str = str.replace(/\\n/g, "\n")
-                                 .replace(/\\r/g, " ")
-                                 .replace(/\\t/g, " ")
-                                 .replace(/\\\\/g, "\\")
-                                 .replace(/\\([()\\])/g, "$1")
-                                 .replace(/\\([0-7]{1,3})/g, function(m, oct) {
-                                     return String.fromCharCode(parseInt(oct, 8))
-                                 })
-                        ; Accept if followed by Tj, TJ, ' or "
-                        var rest = block.substring(end + 1).trimStart()
-                        if (/^(Tj|TJ|'|")/.test(rest)) text += str
-                        i = end + 1
-                        continue
-                    }
-
-                    ; Array form: [ … ] TJ
-                    if (ch === "[") {
-                        var aEnd = block.indexOf("]", i)
-                        if (aEnd !== -1) {
-                            var afterArr = block.substring(aEnd + 1).trimStart()
-                            if (afterArr.indexOf("TJ") === 0) {
-                                var arr = block.substring(i + 1, aEnd)
-                                var ai  = 0
-                                while (ai < arr.length) {
-                                    if (arr[ai] === "(") {
-                                        var ae = ai + 1
-                                        while (ae < arr.length) {
-                                            if (arr[ae] === "\\" && ae + 1 < arr.length) {
-                                                ae += 2; continue
-                                            }
-                                            if (arr[ae] === ")") break
-                                            ae++
-                                        }
-                                        var chunk = arr.substring(ai + 1, ae)
-                                        ; Decode PDF escape sequences — same as literal string path
-                                        chunk = chunk.replace(/\\n/g, "\n")
-                                                     .replace(/\\r/g, " ")
-                                                     .replace(/\\t/g, " ")
-                                                     .replace(/\\\\/g, "\\")
-                                                     .replace(/\\([()\\])/g, "$1")
-                                                     .replace(/\\([0-7]{1,3})/g, function(m, oct) {
-                                                         return String.fromCharCode(parseInt(oct, 8))
-                                                     })
-                                        text += chunk
-                                        ai = ae + 1
-                                    } else if (arr[ai] === "-" || (arr[ai] >= "0" && arr[ai] <= "9")) {
-                                        ; Large negative spacing value = word gap
-                                        var ne = ai
-                                        while (ne < arr.length && arr[ne] !== " " && arr[ne] !== "(" && arr[ne] !== "\n") ne++
-                                        var nv = parseFloat(arr.substring(ai, ne))
-                                        if (nv < -100) text += " "
-                                        ai = ne
-                                    } else { ai++ }
+                            var contentXhr = new XMLHttpRequest()
+                            contentXhr.open("GET",
+                                "file:///home/root/.local/share/remarkable/xochitl/" + docId + ".content")
+                            contentXhr.onreadystatechange = function() {
+                                if (contentXhr.readyState !== XMLHttpRequest.DONE) return
+                                var fileType = "notebook"
+                                if (contentXhr.status === 200) {
+                                    try {
+                                        var contentMeta = JSON.parse(contentXhr.responseText)
+                                        fileType = contentMeta.fileType || "notebook"
+                                    } catch (e) {}
                                 }
-                                i = aEnd + 1
+
+                                if (fileType === "epub") {
+                                    translatePanel.loadEpubCachedText(docId, pageNum)
+                                } else if (fileType === "pdf") {
+                                    translatePanel.loadPdfText(docId, pageNum)
+                                } else {
+                                    translatePanel.loadTextConversion(docId, pageNum)
+                                }
+                            }
+                            contentXhr.send()
+                        }
+                        metaPageXhr.send()
+                    }
+                    confXhr.send()
+                }
+
+                function loadPdfText(docId, pageNum) {
+                    var pdfPath = "/home/root/.local/share/remarkable/xochitl/" + docId + ".pdf"
+                    var rawResult = translateCommandExecutor.executeCommand(
+                        "/home/root/xovi/bin/translate-pdf-cli",
+                        [pdfPath, String(pageNum)]
+                    )
+                    var parsed = null
+                    try {
+                        parsed = JSON.parse(rawResult)
+                    } catch (e) {}
+
+                    if (parsed && parsed.stdout && parsed.stdout.trim().length > 0) {
+                        translatePanel.applyLoadedText(parsed.stdout)
+                        return
+                    }
+
+                    var errText = ""
+                    if (parsed && parsed.stderr)
+                        errText = parsed.stderr.trim()
+                    if (!errText)
+                        errText = "translate-pdf-cli produced no output."
+                    translatePanel.setLoadError("Error: " + errText)
+                }
+
+                function loadPlainTextFile(fileUrl, missingMessage) {
+                    var textXhr = new XMLHttpRequest()
+                    textXhr.open("GET", fileUrl)
+                    textXhr.onreadystatechange = function() {
+                        if (textXhr.readyState !== XMLHttpRequest.DONE) return
+                        if (textXhr.status === 200) {
+                            translatePanel.applyLoadedText(textXhr.responseText)
+                        } else {
+                            translatePanel.setLoadError(missingMessage || (
+                                "Error: failed to load extracted text (status " + textXhr.status + ")"
+                            ))
+                        }
+                    }
+                    textXhr.send()
+                }
+
+                function findEpubPageSlice(indexData, pageNum) {
+                    var pat = "OEBPS/Text/"
+                    var bestStartPage = -1
+                    var bestInfo = null
+                    var i = 0
+                    while (i + pat.length * 2 < indexData.length) {
+                        var matched = true
+                        var j = 0
+                        while (j < pat.length) {
+                            if (translatePanel.byteAt(indexData, i + j * 2) !== 0 ||
+                                translatePanel.byteAt(indexData, i + j * 2 + 1) !== pat.charCodeAt(j)) {
+                                matched = false
+                                break
+                            }
+                            j++
+                        }
+                        if (!matched) {
+                            i++
+                            continue
+                        }
+
+                        var endIdx = i
+                        while (endIdx + 1 < indexData.length) {
+                            if (translatePanel.byteAt(indexData, endIdx) === 0 &&
+                                translatePanel.byteAt(indexData, endIdx + 1) === 0) {
+                                break
+                            }
+                            endIdx += 2
+                        }
+                        if (endIdx + 18 > indexData.length) break
+
+                        var path = translatePanel.readUtf16BeString(indexData, i, endIdx)
+                        var a = translatePanel.readU16BE(indexData, endIdx + 2)
+                        var b = translatePanel.readU16BE(indexData, endIdx + 4)
+                        var c = translatePanel.readU16BE(indexData, endIdx + 6)
+                        var d = translatePanel.readU16BE(indexData, endIdx + 8)
+                        var e = translatePanel.readU16BE(indexData, endIdx + 10)
+                        var f = translatePanel.readU16BE(indexData, endIdx + 12)
+                        var g = translatePanel.readU16BE(indexData, endIdx + 14)
+                        var h = translatePanel.readU16BE(indexData, endIdx + 16)
+
+                        if (b === 0 && d === 0 && f === 0 && h === 0 &&
+                            c > 0 && g > 0 && e <= pageNum && e > bestStartPage) {
+                            bestStartPage = e
+                            bestInfo = {
+                                path: path,
+                                startItem: a,
+                                itemCount: c,
+                                startPage: e,
+                                pageCount: g
+                            }
+                        }
+                        i = endIdx + 2
+                    }
+                    return bestInfo
+                }
+
+                function loadEpubCachedText(docId, pageNum) {
+                    var idxXhr = new XMLHttpRequest()
+                    idxXhr.open("GET",
+                        "file:///home/root/.local/share/remarkable/xochitl/" + docId + ".epubindex")
+                    idxXhr.onreadystatechange = function() {
+                        if (idxXhr.readyState !== XMLHttpRequest.DONE) return
+                        if (idxXhr.status !== 200) {
+                            translatePanel.loadPdfText(docId, pageNum)
+                            return
+                        }
+
+                        var pageInfo = translatePanel.findEpubPageSlice(idxXhr.responseText, pageNum)
+                        if (!pageInfo || !pageInfo.path) {
+                            translatePanel.loadPdfText(docId, pageNum)
+                            return
+                        }
+
+                        var cacheXhr = new XMLHttpRequest()
+                        cacheXhr.open("GET",
+                            "file:///home/root/.cache/translate-plugin-epub/" + docId + "/" + pageInfo.path + ".blocks.txt")
+                        cacheXhr.onreadystatechange = function() {
+                            if (cacheXhr.readyState !== XMLHttpRequest.DONE) return
+                            if (cacheXhr.status === 200 && cacheXhr.responseText.trim().length > 0) {
+                                var sliced = translatePanel.sliceEpubBlockText(cacheXhr.responseText, pageInfo, pageNum)
+                                if (sliced && sliced.trim().length > 0) {
+                                    translatePanel.applyLoadedText(sliced)
+                                } else {
+                                    translatePanel.loadPdfText(docId, pageNum)
+                                }
+                            } else {
+                                translatePanel.loadPdfText(docId, pageNum)
+                            }
+                        }
+                        cacheXhr.send()
+                    }
+                    idxXhr.send()
+                }
+
+                function sliceEpubBlockText(blockText, pageInfo, pageNum) {
+                    var fragments = translatePanel.buildEpubFragments(blockText)
+                    var i = 0
+                    var totalWeight = 0
+                    var startWeight = 0
+                    var endWeight = 0
+                    var startIdx = 0
+                    var endIdx = 0
+                    var prefix = 0
+                    var out = ""
+
+                    if (pageInfo.itemCount <= 0 || pageInfo.pageCount <= 0) {
+                        return blockText
+                    }
+
+                    if (fragments.length === 0) {
+                        return blockText
+                    }
+
+                    var localPage = pageNum - pageInfo.startPage
+                    if (localPage < 0) localPage = 0
+                    if (localPage >= pageInfo.pageCount) localPage = pageInfo.pageCount - 1
+
+                    i = 0
+                    while (i < fragments.length) {
+                        totalWeight += Math.max(1, fragments[i].length)
+                        i++
+                    }
+
+                    startWeight = ((localPage + 0.40) * totalWeight) / pageInfo.pageCount
+                    endWeight = ((localPage + 1.55) * totalWeight) / pageInfo.pageCount
+                    if (endWeight > totalWeight) endWeight = totalWeight
+
+                    prefix = 0
+                    startIdx = 0
+                    while (startIdx < fragments.length) {
+                        prefix += Math.max(1, fragments[startIdx].length)
+                        if (prefix > startWeight) break
+                        startIdx++
+                    }
+
+                    prefix = 0
+                    endIdx = 0
+                    while (endIdx < fragments.length) {
+                        if (prefix >= endWeight) break
+                        prefix += Math.max(1, fragments[endIdx].length)
+                        endIdx++
+                    }
+
+                    if (endIdx <= startIdx) endIdx = startIdx + 1
+
+                    i = startIdx
+                    while (i < endIdx && i < fragments.length) {
+                        if (out.length > 0) out += "\n"
+                        out += fragments[i]
+                        i++
+                    }
+
+                    while (out.indexOf("\n\n\n") !== -1)
+                        out = out.replace("\n\n\n", "\n\n")
+                    return out.trim()
+                }
+
+                function trimString(str) {
+                    var start = 0
+                    var end = str.length
+                    while (start < end) {
+                        var ch = str[start]
+                        if (ch !== " " && ch !== "\n" && ch !== "\r" && ch !== "\t") break
+                        start++
+                    }
+                    while (end > start) {
+                        var ch2 = str[end - 1]
+                        if (ch2 !== " " && ch2 !== "\n" && ch2 !== "\r" && ch2 !== "\t") break
+                        end--
+                    }
+                    return str.substring(start, end)
+                }
+
+                function buildEpubFragments(blockText) {
+                    var rawLines = blockText.split("\n")
+                    var out = []
+                    var li = 0
+                    while (li < rawLines.length) {
+                        var line = translatePanel.trimString(rawLines[li].replace(/\r/g, ""))
+                        var cur = ""
+                        var ci = 0
+                        if (!line.length) {
+                            li++
+                            continue
+                        }
+
+                        while (ci < line.length) {
+                            var ch = line[ci]
+
+                            if (ch === " " || ch === "\t") {
+                                if (cur.length > 0 &&
+                                    translatePanel.isEpubPhraseBreakChar(cur[cur.length - 1])) {
+                                    out.push(translatePanel.trimString(cur))
+                                    cur = ""
+                                } else if (cur.length > 0 && cur[cur.length - 1] !== " ") {
+                                    cur += " "
+                                }
+                                ci++
+                                continue
+                            }
+
+                            cur += ch
+
+                            if (ch === "." || ch === "!" || ch === "?") {
+                                out.push(translatePanel.trimString(cur))
+                                cur = ""
+                            }
+                            ci++
+                        }
+
+                        cur = translatePanel.trimString(cur)
+                        if (cur.length > 0) out.push(cur)
+                        li++
+                    }
+                    return out
+                }
+
+                function isEpubPhraseBreakChar(ch) {
+                    var code = ch.charCodeAt(0)
+                    return code === 45796 || code === 50836 || code === 51424 ||
+                           code === 45348 || code === 44620
+                }
+
+                function trimLeftString(str) {
+                    var i = 0
+                    while (i < str.length) {
+                        var ch = str[i]
+                        if (ch !== " " && ch !== "\n" && ch !== "\r" && ch !== "\t") break
+                        i++
+                    }
+                    return str.substring(i)
+                }
+
+                function decodePdfString(str) {
+                    var out = ""
+                    var i = 0
+                    while (i < str.length) {
+                        var ch = str[i]
+                        if (ch !== "\\") {
+                            out += ch
+                            i++
+                            continue
+                        }
+                        if (i + 1 >= str.length) break
+                        var nx = str[i + 1]
+                        if (nx === "n") {
+                            out += "\n"
+                            i += 2
+                            continue
+                        }
+                        if (nx === "r" || nx === "t") {
+                            out += " "
+                            i += 2
+                            continue
+                        }
+                        if (nx === "\\" || nx === "(" || nx === ")") {
+                            out += nx
+                            i += 2
+                            continue
+                        }
+                        if (nx >= "0" && nx <= "7") {
+                            var oct = nx
+                            var j = i + 2
+                            var count = 1
+                            while (j < str.length && count < 3 && str[j] >= "0" && str[j] <= "7") {
+                                oct += str[j]
+                                j++
+                                count++
+                            }
+                            out += String.fromCharCode(parseInt(oct, 8))
+                            i = j
+                            continue
+                        }
+                        out += nx
+                        i += 2
+                    }
+                    return out
+                }
+
+                function extractPdfPageText(pdfData, pageNum) {
+                    var pageOffsets = []
+                    var searchPos = 0
+                    var marker = "/Type /Page"
+                    while (true) {
+                        var pp = pdfData.indexOf(marker, searchPos)
+                        if (pp === -1) break
+                        pageOffsets.push(pp)
+                        searchPos = pp + marker.length
+                    }
+
+                    var blocks = []
+                    var pos = 0
+                    var safe = 100000
+                    var iters = 0
+                    while (pos < pdfData.length && iters < safe) {
+                        iters++
+                        var btIdx = pdfData.indexOf("BT", pos)
+                        if (btIdx === -1) break
+                        var cb = btIdx > 0 ? pdfData[btIdx - 1] : "\n"
+                        var ca = btIdx + 2 < pdfData.length ? pdfData[btIdx + 2] : "\n"
+                        if (" \n\r".indexOf(cb) === -1 || " \n\r".indexOf(ca) === -1) {
+                            pos = btIdx + 2
+                            continue
+                        }
+                        var etIdx = pdfData.indexOf("ET", btIdx + 2)
+                        if (etIdx === -1) break
+                        var cbe = etIdx > 0 ? pdfData[etIdx - 1] : "\n"
+                        var cae = etIdx + 2 < pdfData.length ? pdfData[etIdx + 2] : "\n"
+                        if (" \n\r".indexOf(cbe) === -1 || " \n\r".indexOf(cae) === -1) {
+                            pos = btIdx + 2
+                            continue
+                        }
+                        blocks.push([btIdx, pdfData.substring(btIdx + 2, etIdx)])
+                        pos = etIdx + 2
+                    }
+
+                    if (blocks.length === 0) return ""
+
+                    var targetBlocks = blocks
+                    if (pageOffsets.length > 0) {
+                        var pgStart = pageOffsets[pageNum] !== undefined ? pageOffsets[pageNum] : pageOffsets[0]
+                        var pgEnd = pageOffsets[pageNum + 1] !== undefined ? pageOffsets[pageNum + 1] : pdfData.length
+                        var filtered = []
+                        var bi = 0
+                        while (bi < blocks.length) {
+                            if (blocks[bi][0] >= pgStart && blocks[bi][0] < pgEnd)
+                                filtered.push(blocks[bi])
+                            bi++
+                        }
+                        if (filtered.length > 0) targetBlocks = filtered
+                    }
+
+                    var output = ""
+                    var ti = 0
+                    while (ti < targetBlocks.length) {
+                        output += translatePanel.parsePdfTextBlock(targetBlocks[ti][1])
+                        ti++
+                    }
+                    return output.trim()
+                }
+
+                function parsePdfTextBlock(block) {
+                    var text = ""
+                    var i = 0
+                    while (i < block.length) {
+                        var ch = block[i]
+
+                        if (ch === "(") {
+                            var end = i + 1
+                            while (end < block.length) {
+                                if (block[end] === "\\" && end + 1 < block.length) {
+                                    end += 2
+                                    continue
+                                }
+                                if (block[end] === ")") break
+                                end++
+                            }
+                            var str = translatePanel.decodePdfString(block.substring(i + 1, end))
+                            var rest = translatePanel.trimLeftString(block.substring(end + 1))
+                            if (rest.indexOf("Tj") === 0 || rest.indexOf("TJ") === 0 || rest.indexOf("'") === 0 || rest.indexOf("\"") === 0)
+                                text += str
+                            i = end + 1
+                            continue
+                        }
+
+                        if (ch === "[") {
+                            var aEnd = block.indexOf("]", i)
+                            if (aEnd !== -1) {
+                                var afterArr = translatePanel.trimLeftString(block.substring(aEnd + 1))
+                                if (afterArr.indexOf("TJ") === 0) {
+                                    var arr = block.substring(i + 1, aEnd)
+                                    var ai = 0
+                                    while (ai < arr.length) {
+                                        if (arr[ai] === "(") {
+                                            var ae = ai + 1
+                                            while (ae < arr.length) {
+                                                if (arr[ae] === "\\" && ae + 1 < arr.length) {
+                                                    ae += 2
+                                                    continue
+                                                }
+                                                if (arr[ae] === ")") break
+                                                ae++
+                                            }
+                                            text += translatePanel.decodePdfString(arr.substring(ai + 1, ae))
+                                            ai = ae + 1
+                                            continue
+                                        }
+
+                                        if (arr[ai] === "-" || (arr[ai] >= "0" && arr[ai] <= "9")) {
+                                            var ne = ai
+                                            while (ne < arr.length && arr[ne] !== " " && arr[ne] !== "(" && arr[ne] !== "\n")
+                                                ne++
+                                            var nv = parseFloat(arr.substring(ai, ne))
+                                            if (nv < -100) text += " "
+                                            ai = ne
+                                            continue
+                                        }
+                                        ai++
+                                    }
+                                    i = aEnd + 1
+                                    continue
+                                }
+                            }
+                        }
+
+                        if (ch === "T" && i + 1 < block.length) {
+                            var nx = block[i + 1]
+                            if (nx === "d" || nx === "D" || nx === "*") {
+                                text += "\n"
+                                i += 2
                                 continue
                             }
                         }
-                    }
 
-                    ; Td, TD, T* → new line
-                    if (ch === "T" && i + 1 < block.length) {
-                        var nx = block[i + 1]
-                        if (nx === "d" || nx === "D" || nx === "*") {
-                            text += "\n"; i += 2; continue
+                        i++
+                    }
+                    return text
+                }
+
+                function loadTextConversion(docId, pageNum) {
+                    var ocrXhr = new XMLHttpRequest()
+                    ocrXhr.open("GET",
+                        "file:///home/root/.local/share/remarkable/xochitl/" + docId + ".textconversion")
+                    ocrXhr.onreadystatechange = function() {
+                        if (ocrXhr.readyState !== XMLHttpRequest.DONE) return
+                        if (ocrXhr.status !== 200) {
+                            translatePanel.setLoadError(
+                                "Error: text data not found for this document. "
+                                + "For PDFs and ePubs: ensure the sibling PDF has an embedded text layer. "
+                                + "For notebooks: enable handwriting-to-text conversion."
+                            )
+                            return
+                        }
+                        try {
+                            var data = JSON.parse(ocrXhr.responseText)
+                            if (data && typeof data.text === "string") {
+                                translatePanel.applyLoadedText(data.text)
+                            } else if (data && Array.isArray(data.pages)) {
+                                var pg = data.pages[pageNum]
+                                translatePanel.applyLoadedText(pg ? (pg.text || "") : "")
+                            } else {
+                                translatePanel.setLoadError("Error: unrecognised text format.")
+                            }
+                        } catch (e) {
+                            translatePanel.setLoadError("Error: failed to parse text data. " + e.message)
                         }
                     }
-
-                    i++
+                    ocrXhr.send()
                 }
-                return text
-            }
 
-            ; ── Notebook / ePub text (xochitl handwriting-to-text) ────────
-            function loadTextConversion(docId, pageNum) {
-                var ocrXhr = new XMLHttpRequest()
-                ocrXhr.open("GET",
-                    "file:///home/root/.local/share/remarkable/xochitl/"
-                    + docId + ".textconversion")
-                ocrXhr.onreadystatechange = function() {
-                    if (ocrXhr.readyState !== XMLHttpRequest.DONE) return
-                    if (ocrXhr.status !== 200) {
-                        sourceText = "Error: text data not found for this document. "
-                                   + "For PDFs: ensure the file has an embedded text layer. "
-                                   + "For notebooks: enable handwriting-to-text conversion."
+                function doTranslateText(text) {
+                    text = text || ""
+                    text = text.replace(/\r/g, "").trim()
+                    if (!text.length) {
+                        loading = false
+                        setTranslatedText("Error: no source text to translate.")
                         return
                     }
-                    try {
-                        var data = JSON.parse(ocrXhr.responseText)
-                        if (data && typeof data.text === "string") {
-                            sourceText = data.text
-                        } else if (data && Array.isArray(data.pages)) {
-                            var pg = data.pages[pageNum]
-                            sourceText = pg ? (pg.text || "") : ""
-                        } else {
-                            sourceText = "Error: unrecognised text format."
+
+                    loading = true
+                    setTranslatedText("")
+
+                    var xhr = new XMLHttpRequest()
+                    var url = "https://translate.googleapis.com/translate_a/single"
+                            + "?client=gtx&sl=" + encodeURIComponent(sourceLang)
+                            + "&tl=" + encodeURIComponent(targetLang)
+                            + "&dt=t&q=" + encodeURIComponent(text)
+                    xhr.open("GET", url)
+                    xhr.onreadystatechange = function() {
+                        if (xhr.readyState !== XMLHttpRequest.DONE) return
+                        loading = false
+                        if (xhr.status !== 200) {
+                            setTranslatedText("Error: translation request failed (status " + xhr.status + ")")
+                            return
                         }
-                    } catch (e) {
-                        sourceText = "Error: failed to parse text data. " + e.message
+                        try {
+                            var data = JSON.parse(xhr.responseText)
+                            var out = ""
+                            if (data && data[0] && data[0].length) {
+                                var i = 0
+                                while (i < data[0].length) {
+                                    if (data[0][i] && data[0][i][0])
+                                        out += data[0][i][0]
+                                    i++
+                                }
+                            }
+                            if (!out.length) {
+                                setTranslatedText("Error: translation response was empty.")
+                                return
+                            }
+                            setTranslatedText(out)
+                        } catch (e) {
+                            setTranslatedText("Error: failed to parse translation response. " + e.message)
+                        }
                     }
+                    xhr.send()
                 }
-                ocrXhr.send()
-            }
 
-            function loadConfig() {
-                var xhr = new XMLHttpRequest()
-                xhr.open("GET",
-                    "file:///home/root/.config/translate-plugin.json")
-                xhr.onreadystatechange = function() {
-                    if (xhr.readyState !== XMLHttpRequest.DONE) return
-                    if (xhr.status !== 200) return   ; first-run: no config file yet
-                    try {
-                        var cfg = JSON.parse(xhr.responseText)
-                        if (cfg.targetLang)        targetLang = cfg.targetLang
-                        if (cfg.x !== undefined)   savedX = cfg.x
-                        if (cfg.y !== undefined)   savedY = cfg.y
-                    } catch (e) {
-                        console.log("TranslatePlugin: config parse error: " + e.message)
+                function doTranslate() {
+                    doTranslateText(sourceText)
+                }
+
+                function loadConfig() {
+                    var xhr = new XMLHttpRequest()
+                    xhr.open("GET", "file:///home/root/.config/translate-plugin.json")
+                    xhr.onreadystatechange = function() {
+                        if (xhr.readyState !== XMLHttpRequest.DONE) return
+                        if (xhr.status !== 200) return
+                        try {
+                            var cfg = JSON.parse(xhr.responseText)
+                            if (cfg.bodyVisible !== undefined) bodyVisible = cfg.bodyVisible
+                            if (cfg.sourceLang !== undefined) sourceLang = cfg.sourceLang
+                            if (cfg.targetLang !== undefined) targetLang = cfg.targetLang
+                            if (cfg.x !== undefined) ~&233745975898428&~.translatePanelX = cfg.x
+                            if (cfg.y !== undefined) ~&233745975898428&~.translatePanelY = cfg.y
+                        } catch (e) {
+                            console.log("TranslatePlugin: config parse error: " + e.message)
+                        }
                     }
+                    xhr.send()
                 }
-                xhr.send()
-            }
 
-            function saveConfig() {
-                var xhr = new XMLHttpRequest()
-                xhr.open("PUT",
-                    "file:///home/root/.config/translate-plugin.json")
-                xhr.onreadystatechange = function() {
-                    if (xhr.readyState !== XMLHttpRequest.DONE) return
-                    if (xhr.status !== 200 && xhr.status !== 0) {
-                        console.log("TranslatePlugin: failed to save config, status: "
-                                    + xhr.status)
+                function saveConfig() {
+                    var xhr = new XMLHttpRequest()
+                    xhr.open("PUT", "file:///home/root/.config/translate-plugin.json")
+                    xhr.onreadystatechange = function() {
+                        if (xhr.readyState !== XMLHttpRequest.DONE) return
+                        if (xhr.status !== 200 && xhr.status !== 0) {
+                            console.log("TranslatePlugin: failed to save config, status: " + xhr.status)
+                        }
                     }
+                    xhr.send(JSON.stringify({
+                        bodyVisible: bodyVisible,
+                        sourceLang: sourceLang,
+                        targetLang: targetLang,
+                        x: ~&233745975898428&~.translatePanelX,
+                        y: ~&233745975898428&~.translatePanelY
+                    }))
                 }
-                xhr.send(JSON.stringify({
-                    targetLang: targetLang,
-                    x:          savedX,
-                    y:          savedY
-                }))
-            }
 
-            Component.onCompleted: loadConfig()
+                Component.onCompleted: {
+                    translatePanel.loadConfig()
+                    translatePanel.setSourceText("")
+                    translatePanel.setTranslatedText("")
+                }
+            }
         }
-    }
     END TRAVERSE
 END AFFECT

@@ -1,40 +1,34 @@
 maintainer="haroldxie2308"
 pkgname=page-translator
-pkgver=1.0.0
+pkgver=1.1.0
 pkgrel=0
 upstream_author="haroldxie2308"
 category="ui"
-pkgdesc="Floating page-translation overlay for reMarkable (Google Translate API)"
+pkgdesc="Floating page-translation overlay for reMarkable with exact PDF page extraction"
 url="https://github.com/haroldxie2308/reMain"
-arch="noarch"
+arch="aarch64"
 license="MIT"
 
-# qt-resource-rebuilder is the XOVI extension that applies .qmd patches to
-# xochitl's compiled QML resources at boot.
-depends="qt-resource-rebuilder"
+depends="qt-resource-rebuilder qt-command-executor"
+optdepends="remarkable-os>=3.26: tested on reMarkable OS 3.26"
 
-# Hash selectors in translate.qmd were extracted from FouzR/xovi-extensions
-# for xochitl 3.25.  Bump the upper bound once 3.26 compatibility is
-# confirmed (see README for instructions).
-optdepends="remarkable-os>=3.25: tested xochitl version"
-
-_commit="HEAD"
+_commit="main"
 source="
     https://raw.githubusercontent.com/haroldxie2308/reMain/${_commit}/translate.qmd
+    https://raw.githubusercontent.com/haroldxie2308/reMain/${_commit}/native-helper/build/translate-pdf-cli.aarch64
     https://raw.githubusercontent.com/haroldxie2308/reMain/${_commit}/LICENSE
 "
 options="!check !fhs"
 
 package() {
-    # Install the QMLDiff patch so qt-resource-rebuilder picks it up at boot
     install -Dm644 "$srcdir"/translate.qmd \
         "$pkgdir"/home/root/xovi/exthome/qt-resource-rebuilder/translate.qmd
+    install -Dm755 "$srcdir"/translate-pdf-cli.aarch64 \
+        "$pkgdir"/home/root/xovi/bin/translate-pdf-cli
 
-    # License
     install -Dm644 "$srcdir"/LICENSE \
         "$pkgdir"/home/root/.vellum/licenses/$pkgname/LICENSE
 
-    # Source URL record required by vellum
     echo "https://github.com/haroldxie2308/reMain" \
         > "$pkgdir"/home/root/.vellum/licenses/$pkgname/SOURCES
 }

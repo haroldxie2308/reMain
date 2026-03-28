@@ -1,0 +1,6 @@
+.DS_Store
+.cache/
+.vscode/
+native-helper/src/*.o
+native-helper/build/*
+!native-helper/build/translate-pdf-cli.aarch64
