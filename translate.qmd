@@ -278,33 +278,8 @@ AFFECT [[1224665461898798997]]
                     color: "black"
                     radius: 0
 
-                    MouseArea {
-                        anchors.fill: parent
-                        anchors.rightMargin: 90
-
-                        property real pressX: 0
-                        property real pressY: 0
-                        property real startPanelX: 0
-                        property real startPanelY: 0
-
-                        onPressed: function(mouse) {
-                            pressX = mouse.x
-                            pressY = mouse.y
-                            startPanelX = ~&233745975898428&~.translatePanelX
-                            startPanelY = ~&233745975898428&~.translatePanelY
-                        }
-
-                        onPositionChanged: function(mouse) {
-                            ~&233745975898428&~.translatePanelX = startPanelX + (mouse.x - pressX)
-                            ~&233745975898428&~.translatePanelY = startPanelY + (mouse.y - pressY)
-                        }
-
-                        onReleased: {
-                            translatePanel.saveConfig()
-                        }
-                    }
-
                     Rectangle {
+                        id: headerHandle
                         anchors.left: parent.left
                         anchors.leftMargin: 0
                         anchors.verticalCenter: parent.verticalCenter
@@ -323,7 +298,41 @@ AFFECT [[1224665461898798997]]
 
                         MouseArea {
                             anchors.fill: parent
+                            property real pressSceneX: 0
+                            property real pressSceneY: 0
+                            property real startPanelX: 0
+                            property real startPanelY: 0
+                            property bool dragged: false
+
+                            function toScenePoint(localX, localY) {
+                                return headerHandle.mapToItem(null, localX, localY)
+                            }
+
+                            onPressed: function(mouse) {
+                                var point = toScenePoint(mouse.x, mouse.y)
+                                pressSceneX = point.x
+                                pressSceneY = point.y
+                                startPanelX = ~&233745975898428&~.translatePanelX
+                                startPanelY = ~&233745975898428&~.translatePanelY
+                                dragged = false
+                            }
+
+                            onPositionChanged: function(mouse) {
+                                var point = toScenePoint(mouse.x, mouse.y)
+                                var dx = point.x - pressSceneX
+                                var dy = point.y - pressSceneY
+                                if (!dragged && (dx > 4 || dx < -4 || dy > 4 || dy < -4))
+                                    dragged = true
+                                ~&233745975898428&~.translatePanelX = startPanelX + dx
+                                ~&233745975898428&~.translatePanelY = startPanelY + dy
+                            }
+
+                            onReleased: {
+                                translatePanel.saveConfig()
+                            }
+
                             onClicked: {
+                                if (dragged) return
                                 translatePanel.collapseToIcon()
                             }
                         }
@@ -439,23 +448,29 @@ AFFECT [[1224665461898798997]]
                     MouseArea {
                         anchors.fill: parent
 
-                        property real pressX: 0
-                        property real pressY: 0
+                        property real pressSceneX: 0
+                        property real pressSceneY: 0
                         property real startPanelX: 0
                         property real startPanelY: 0
                         property bool dragged: false
 
+                        function toScenePoint(localX, localY) {
+                            return foldedIcon.mapToItem(null, localX, localY)
+                        }
+
                         onPressed: function(mouse) {
-                            pressX = mouse.x
-                            pressY = mouse.y
+                            var point = toScenePoint(mouse.x, mouse.y)
+                            pressSceneX = point.x
+                            pressSceneY = point.y
                             startPanelX = ~&233745975898428&~.translatePanelX
                             startPanelY = ~&233745975898428&~.translatePanelY
                             dragged = false
                         }
 
                         onPositionChanged: function(mouse) {
-                            var dx = mouse.x - pressX
-                            var dy = mouse.y - pressY
+                            var point = toScenePoint(mouse.x, mouse.y)
+                            var dx = point.x - pressSceneX
+                            var dy = point.y - pressSceneY
                             if (!dragged && (dx > 4 || dx < -4 || dy > 4 || dy < -4))
                                 dragged = true
                             ~&233745975898428&~.translatePanelX = startPanelX + dx
