@@ -41,13 +41,17 @@ AFFECT [[1224665461898798997]]
             Item {
                 id: translatePanel
                 visible: ~&233745975898428&~.translatePanelVisible
-                x: ~&233745975898428&~.translatePanelX
-                y: ~&233745975898428&~.translatePanelY
-                width: collapsed ? 60 : 760
-                height: collapsed ? 60 : 700
+                x: panelOriginX()
+                y: panelOriginY()
+                width: collapsed ? handleSize : expandedWidth
+                height: collapsed ? handleSize : expandedHeight
                 z: 1000
                 clip: true
 
+                property real handleSize: 60
+                property real expandedWidth: 760
+                property real expandedHeight: 700
+                property real panelMargin: 8
                 property bool collapsed: false
                 property bool loading: false
                 property string sourceText: ""
@@ -55,6 +59,8 @@ AFFECT [[1224665461898798997]]
                 property string sourceLang: "auto"
                 property string targetLang: "en"
                 property bool translateAfterLoad: false
+                property bool expandLeft: false
+                property bool expandUp: false
                 property var sourceLangs: [
                     { code: "auto", label: "Auto" },
                     { code: "ko", label: "KR" },
@@ -71,8 +77,93 @@ AFFECT [[1224665461898798997]]
                     id: translateCommandExecutor
                 }
 
+                function viewportWidth() {
+                    if (parent && parent.width) return parent.width
+                    return expandedWidth + panelMargin * 2
+                }
+
+                function viewportHeight() {
+                    if (parent && parent.height) return parent.height
+                    return expandedHeight + panelMargin * 2
+                }
+
+                function clampCoord(value, itemSize, viewportSize) {
+                    var minValue = panelMargin
+                    var maxValue = viewportSize - itemSize - panelMargin
+                    if (maxValue < minValue)
+                        maxValue = minValue
+                    if (value < minValue) return minValue
+                    if (value > maxValue) return maxValue
+                    return value
+                }
+
+                function currentAnchorX() {
+                    return clampCoord(~&233745975898428&~.translatePanelX, handleSize, viewportWidth())
+                }
+
+                function currentAnchorY() {
+                    return clampCoord(~&233745975898428&~.translatePanelY, handleSize, viewportHeight())
+                }
+
+                function chooseHorizontalPlacement(anchorX) {
+                    var rightOrigin = clampCoord(anchorX, expandedWidth, viewportWidth())
+                    var leftOrigin = clampCoord(anchorX - (expandedWidth - handleSize), expandedWidth, viewportWidth())
+                    var rightShift = Math.abs(rightOrigin - anchorX)
+                    var leftShift = Math.abs((leftOrigin + expandedWidth - handleSize) - anchorX)
+                    if (leftShift < rightShift) return true
+                    if (rightShift < leftShift) return false
+                    return anchorX + expandedWidth > viewportWidth() - panelMargin
+                }
+
+                function chooseVerticalPlacement(anchorY) {
+                    var downOrigin = clampCoord(anchorY, expandedHeight, viewportHeight())
+                    var upOrigin = clampCoord(anchorY - (expandedHeight - handleSize), expandedHeight, viewportHeight())
+                    var downShift = Math.abs(downOrigin - anchorY)
+                    var upShift = Math.abs((upOrigin + expandedHeight - handleSize) - anchorY)
+                    if (upShift < downShift) return true
+                    if (downShift < upShift) return false
+                    return anchorY + expandedHeight > viewportHeight() - panelMargin
+                }
+
+                function refreshPlacement() {
+                    if (collapsed) {
+                        expandLeft = false
+                        expandUp = false
+                        return
+                    }
+                    var anchorX = currentAnchorX()
+                    var anchorY = currentAnchorY()
+                    expandLeft = chooseHorizontalPlacement(anchorX)
+                    expandUp = chooseVerticalPlacement(anchorY)
+                }
+
+                function panelOriginX() {
+                    var anchorX = currentAnchorX()
+                    if (collapsed) return anchorX
+                    if (expandLeft) {
+                        return clampCoord(anchorX - (expandedWidth - handleSize), expandedWidth, viewportWidth())
+                    }
+                    return clampCoord(anchorX, expandedWidth, viewportWidth())
+                }
+
+                function panelOriginY() {
+                    var anchorY = currentAnchorY()
+                    if (collapsed) return anchorY
+                    if (expandUp) {
+                        return clampCoord(anchorY - (expandedHeight - handleSize), expandedHeight, viewportHeight())
+                    }
+                    return clampCoord(anchorY, expandedHeight, viewportHeight())
+                }
+
+                function setAnchorPosition(newX, newY) {
+                    ~&233745975898428&~.translatePanelX = clampCoord(newX, handleSize, viewportWidth())
+                    ~&233745975898428&~.translatePanelY = clampCoord(newY, handleSize, viewportHeight())
+                    refreshPlacement()
+                }
+
                 function showTranslationPanel() {
                     collapsed = false
+                    refreshPlacement()
                 }
 
                 function collapseToIcon() {
@@ -82,6 +173,7 @@ AFFECT [[1224665461898798997]]
 
                 function expandFromIcon() {
                     collapsed = false
+                    refreshPlacement()
                     saveConfig()
                 }
 
@@ -195,8 +287,8 @@ AFFECT [[1224665461898798997]]
                 function setLoadError(message) {
                     translateAfterLoad = false
                     loading = false
-                    setSourceText(message || "")
-                    setTranslatedText("")
+                    setSourceText("")
+                    setTranslatedText(message || "")
                 }
 
                 function applyLoadedText(newText) {
@@ -274,17 +366,17 @@ AFFECT [[1224665461898798997]]
                     id: translateHeader
                     visible: !translatePanel.collapsed
                     width: parent.width
-                    height: 60
+                    height: translatePanel.handleSize
                     color: "black"
                     radius: 0
+                    y: translatePanel.expandUp ? parent.height - height : 0
 
                     Rectangle {
                         id: headerHandle
-                        anchors.left: parent.left
-                        anchors.leftMargin: 0
-                        anchors.verticalCenter: parent.verticalCenter
-                        width: 60
-                        height: 60
+                        x: translatePanel.expandLeft ? parent.width - width : 0
+                        y: 0
+                        width: translatePanel.handleSize
+                        height: translatePanel.handleSize
                         radius: 0
                         color: "black"
 
@@ -312,8 +404,8 @@ AFFECT [[1224665461898798997]]
                                 var point = toScenePoint(mouse.x, mouse.y)
                                 pressSceneX = point.x
                                 pressSceneY = point.y
-                                startPanelX = ~&233745975898428&~.translatePanelX
-                                startPanelY = ~&233745975898428&~.translatePanelY
+                                startPanelX = translatePanel.currentAnchorX()
+                                startPanelY = translatePanel.currentAnchorY()
                                 dragged = false
                             }
 
@@ -323,8 +415,7 @@ AFFECT [[1224665461898798997]]
                                 var dy = point.y - pressSceneY
                                 if (!dragged && (dx > 4 || dx < -4 || dy > 4 || dy < -4))
                                     dragged = true
-                                ~&233745975898428&~.translatePanelX = startPanelX + dx
-                                ~&233745975898428&~.translatePanelY = startPanelY + dy
+                                translatePanel.setAnchorPosition(startPanelX + dx, startPanelY + dy)
                             }
 
                             onReleased: {
@@ -339,9 +430,10 @@ AFFECT [[1224665461898798997]]
                     }
 
                     Row {
-                        anchors.right: parent.right
-                        anchors.rightMargin: 18
-                        anchors.verticalCenter: parent.verticalCenter
+                        width: childrenRect.width
+                        height: childrenRect.height
+                        y: (parent.height - height) / 2
+                        x: translatePanel.expandLeft ? 18 : parent.width - width - 18
                         spacing: 10
 
                         Rectangle {
@@ -393,14 +485,10 @@ AFFECT [[1224665461898798997]]
                 Column {
                     id: translateBody
                     visible: !translatePanel.collapsed
-                    anchors.top: translateHeader.bottom
-                    anchors.topMargin: 0
-                    anchors.left: parent.left
-                    anchors.right: parent.right
-                    anchors.bottom: parent.bottom
-                    anchors.leftMargin: 16
-                    anchors.rightMargin: 16
-                    anchors.bottomMargin: 16
+                    x: 16
+                    y: translatePanel.expandUp ? 16 : translateHeader.height
+                    width: parent.width - 32
+                    height: parent.height - translateHeader.height - 16
                     spacing: 10
 
                     Rectangle {
@@ -462,8 +550,8 @@ AFFECT [[1224665461898798997]]
                             var point = toScenePoint(mouse.x, mouse.y)
                             pressSceneX = point.x
                             pressSceneY = point.y
-                            startPanelX = ~&233745975898428&~.translatePanelX
-                            startPanelY = ~&233745975898428&~.translatePanelY
+                            startPanelX = translatePanel.currentAnchorX()
+                            startPanelY = translatePanel.currentAnchorY()
                             dragged = false
                         }
 
@@ -473,8 +561,7 @@ AFFECT [[1224665461898798997]]
                             var dy = point.y - pressSceneY
                             if (!dragged && (dx > 4 || dx < -4 || dy > 4 || dy < -4))
                                 dragged = true
-                            ~&233745975898428&~.translatePanelX = startPanelX + dx
-                            ~&233745975898428&~.translatePanelY = startPanelY + dy
+                            translatePanel.setAnchorPosition(startPanelX + dx, startPanelY + dy)
                         }
 
                         onReleased: {
@@ -566,20 +653,59 @@ AFFECT [[1224665461898798997]]
                         "/home/root/xovi/bin/translate-pdf-cli",
                         [pdfPath, String(pageNum)]
                     )
+                    var rawText = rawResult === undefined || rawResult === null ? "" : String(rawResult)
                     var parsed = null
                     try {
-                        parsed = JSON.parse(rawResult)
+                        parsed = JSON.parse(rawText)
                     } catch (e) {}
 
-                    if (parsed && parsed.stdout && parsed.stdout.trim().length > 0) {
-                        translatePanel.applyLoadedText(parsed.stdout)
+                    if (parsed) {
+                        var parsedStdout = parsed.stdout ? String(parsed.stdout) : ""
+                        var parsedStderr = parsed.stderr ? String(parsed.stderr) : ""
+                        if (parsedStdout.trim().length > 0) {
+                            translatePanel.applyLoadedText(parsedStdout)
+                            return
+                        }
+
+                        var parsedErr = parsedStderr.trim()
+                        if (!parsedErr && parsed.exitCode !== undefined && parsed.exitCode !== 0)
+                            parsedErr = "translate-pdf-cli failed with exit code " + parsed.exitCode + "."
+                        if (!parsedErr)
+                            parsedErr = "translate-pdf-cli produced no output."
+                        translatePanel.setLoadError("Error: " + parsedErr)
                         return
                     }
 
+                    var lines = rawText.replace(/\r/g, "").split("\n")
+                    var visibleText = ""
                     var errText = ""
-                    if (parsed && parsed.stderr)
-                        errText = parsed.stderr.trim()
-                    if (!errText)
+                    var li = 0
+                    while (li < lines.length) {
+                        var line = translatePanel.trimString(lines[li])
+                        if (line.length === 0) {
+                            li++
+                            continue
+                        }
+                        if (line.indexOf("[translate-pdf-cli]") === 0) {
+                            li++
+                            continue
+                        }
+                        if (line.indexOf("error:") === 0) {
+                            if (errText.length) errText += " "
+                            errText += line.substring("error:".length).trim()
+                        } else {
+                            if (visibleText.length) visibleText += "\n"
+                            visibleText += line
+                        }
+                        li++
+                    }
+
+                    if (visibleText.trim().length > 0) {
+                        translatePanel.applyLoadedText(visibleText)
+                        return
+                    }
+
+                    if (!errText.length)
                         errText = "translate-pdf-cli produced no output."
                     translatePanel.setLoadError("Error: " + errText)
                 }
@@ -1110,14 +1236,27 @@ AFFECT [[1224665461898798997]]
                         if (xhr.readyState !== XMLHttpRequest.DONE) return
                         if (xhr.status !== 200) return
                         try {
-                            var cfg = JSON.parse(xhr.responseText)
+                            var rawConfig = xhr.responseText ? String(xhr.responseText).trim() : ""
+                            var cfg = null
+                            while (rawConfig.length > 0 && !cfg) {
+                                try {
+                                    cfg = JSON.parse(rawConfig)
+                                } catch (e1) {
+                                    if (rawConfig[rawConfig.length - 1] !== "}") break
+                                    rawConfig = rawConfig.substring(0, rawConfig.length - 1).trim()
+                                }
+                            }
+                            if (!cfg) throw new Error("JSON.parse: Parse error")
                             if (cfg.collapsed !== undefined) collapsed = cfg.collapsed
                             if (cfg.sourceLang !== undefined) sourceLang = cfg.sourceLang
                             if (cfg.targetLang !== undefined) targetLang = cfg.targetLang
-                            if (cfg.x !== undefined) ~&233745975898428&~.translatePanelX = cfg.x
-                            if (cfg.y !== undefined) ~&233745975898428&~.translatePanelY = cfg.y
+                            translatePanel.setAnchorPosition(
+                                cfg.x !== undefined ? cfg.x : translatePanel.currentAnchorX(),
+                                cfg.y !== undefined ? cfg.y : translatePanel.currentAnchorY()
+                            )
                         } catch (e) {
                             console.log("TranslatePlugin: config parse error: " + e.message)
+                            translatePanel.saveConfig()
                         }
                     }
                     xhr.send()
@@ -1136,8 +1275,8 @@ AFFECT [[1224665461898798997]]
                         collapsed: collapsed,
                         sourceLang: sourceLang,
                         targetLang: targetLang,
-                        x: ~&233745975898428&~.translatePanelX,
-                        y: ~&233745975898428&~.translatePanelY
+                        x: translatePanel.currentAnchorX(),
+                        y: translatePanel.currentAnchorY()
                     }))
                 }
 
