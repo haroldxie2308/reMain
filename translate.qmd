@@ -44,13 +44,15 @@ AFFECT [[1224665461898798997]]
                 x: panelOriginX()
                 y: panelOriginY()
                 width: collapsed ? handleSize : expandedWidth
-                height: collapsed ? handleSize : expandedHeight
+                height: collapsed ? handleSize : panelExpandedHeight()
                 z: 1000
                 clip: true
 
                 property real handleSize: 60
                 property real expandedWidth: 760
-                property real expandedHeight: 700
+                property real bodyEdgeMargin: 16
+                property real bodyInnerMargin: 10
+                property real minBodyHeight: 120
                 property real panelMargin: 8
                 property bool collapsed: false
                 property bool loading: false
@@ -84,7 +86,7 @@ AFFECT [[1224665461898798997]]
 
                 function viewportHeight() {
                     if (parent && parent.height) return parent.height
-                    return expandedHeight + panelMargin * 2
+                    return handleSize + minBodyHeight + bodyEdgeMargin + panelMargin * 2
                 }
 
                 function clampCoord(value, itemSize, viewportSize) {
@@ -116,13 +118,14 @@ AFFECT [[1224665461898798997]]
                 }
 
                 function chooseVerticalPlacement(anchorY) {
-                    var downOrigin = clampCoord(anchorY, expandedHeight, viewportHeight())
-                    var upOrigin = clampCoord(anchorY - (expandedHeight - handleSize), expandedHeight, viewportHeight())
+                    var panelHeight = panelExpandedHeight()
+                    var downOrigin = clampCoord(anchorY, panelHeight, viewportHeight())
+                    var upOrigin = clampCoord(anchorY - (panelHeight - handleSize), panelHeight, viewportHeight())
                     var downShift = Math.abs(downOrigin - anchorY)
-                    var upShift = Math.abs((upOrigin + expandedHeight - handleSize) - anchorY)
+                    var upShift = Math.abs((upOrigin + panelHeight - handleSize) - anchorY)
                     if (upShift < downShift) return true
                     if (downShift < upShift) return false
-                    return anchorY + expandedHeight > viewportHeight() - panelMargin
+                    return anchorY + panelHeight > viewportHeight() - panelMargin
                 }
 
                 function refreshPlacement() {
@@ -148,11 +151,43 @@ AFFECT [[1224665461898798997]]
 
                 function panelOriginY() {
                     var anchorY = currentAnchorY()
+                    var panelHeight = panelExpandedHeight()
                     if (collapsed) return anchorY
                     if (expandUp) {
-                        return clampCoord(anchorY - (expandedHeight - handleSize), expandedHeight, viewportHeight())
+                        return clampCoord(anchorY - (panelHeight - handleSize), panelHeight, viewportHeight())
                     }
-                    return clampCoord(anchorY, expandedHeight, viewportHeight())
+                    return clampCoord(anchorY, panelHeight, viewportHeight())
+                }
+
+                function maxExpandedHeight() {
+                    var capHeight = Math.floor(viewportHeight() * 0.5)
+                    var minHeight = handleSize + bodyEdgeMargin + minBodyHeight
+                    if (capHeight < minHeight)
+                        capHeight = minHeight
+                    return capHeight
+                }
+
+                function desiredBodyHeight() {
+                    var contentHeight = minBodyHeight
+                    if (loading) {
+                        contentHeight = minBodyHeight
+                    } else if (resultTextItem && resultTextItem.paintedHeight > 0) {
+                        contentHeight = resultTextItem.paintedHeight + bodyInnerMargin * 2
+                    }
+                    if (contentHeight < minBodyHeight)
+                        contentHeight = minBodyHeight
+                    var maxBody = maxExpandedHeight() - handleSize - bodyEdgeMargin
+                    if (contentHeight > maxBody)
+                        contentHeight = maxBody
+                    return contentHeight
+                }
+
+                function panelExpandedHeight() {
+                    return handleSize + bodyEdgeMargin + desiredBodyHeight()
+                }
+
+                function bodyHeight() {
+                    return panelExpandedHeight() - handleSize - bodyEdgeMargin
                 }
 
                 function setAnchorPosition(newX, newY) {
@@ -258,6 +293,7 @@ AFFECT [[1224665461898798997]]
 
                 function setTranslatedText(newText) {
                     translatedText = normalizeDisplayText(newText)
+                    refreshPlacement()
                 }
 
                 function sourceLangLabel() {
@@ -485,10 +521,10 @@ AFFECT [[1224665461898798997]]
                 Column {
                     id: translateBody
                     visible: !translatePanel.collapsed
-                    x: 16
-                    y: translatePanel.expandUp ? 16 : translateHeader.height
-                    width: parent.width - 32
-                    height: parent.height - translateHeader.height - 16
+                    x: translatePanel.bodyEdgeMargin
+                    y: translatePanel.expandUp ? translatePanel.bodyEdgeMargin : translateHeader.height
+                    width: parent.width - translatePanel.bodyEdgeMargin * 2
+                    height: translatePanel.bodyHeight()
                     spacing: 10
 
                     Rectangle {
@@ -500,7 +536,7 @@ AFFECT [[1224665461898798997]]
 
                         Flickable {
                             anchors.fill: parent
-                            anchors.margins: 10
+                            anchors.margins: translatePanel.bodyInnerMargin
                             clip: true
                             contentWidth: width
                             contentHeight: resultTextItem.paintedHeight
@@ -512,6 +548,7 @@ AFFECT [[1224665461898798997]]
                                 wrapMode: Text.Wrap
                                 font.pixelSize: 24
                                 color: "black"
+                                onPaintedHeightChanged: translatePanel.refreshPlacement()
                             }
                         }
                     }
