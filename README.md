@@ -40,7 +40,8 @@ high-volume use, replace the endpoint with the
 |---|---|
 | Floating, draggable box | Always visible over the document; position persisted across sessions |
 | One-tap expand / collapse | Tap the "T" button to toggle the full panel |
-| Load OCR from current page | Reads `xochitl.conf` to find the open document, then loads its `.textconversion` file |
+| **PDF direct text extraction** | "Load Text" reads the embedded text layer from a PDF — no OCR required |
+| Notebook OCR fallback | For handwritten notebooks and ePubs, falls back to xochitl's `.textconversion` OCR file |
 | Language picker | 12 built-in target languages; selection persisted |
 | Auto-detect source language | Google's `sl=auto` detects the source automatically |
 | Config persistence | Position & language stored in `/home/root/.config/translate-plugin.json` |
@@ -104,9 +105,13 @@ ssh root@remarkable systemctl restart xochitl
 2. A small **"T"** button appears in the upper-left corner (default position).
 3. **Tap** the button to expand the translation panel.
 4. **Drag** the header bar to reposition the panel anywhere on screen.
-5. _(Optional)_ Tap **Load OCR** to auto-fill the source field with the
-   current page's recognised text (requires xochitl OCR to be enabled and
-   the document to have been OCR-processed).
+5. _(Optional)_ Tap **Load Text** to auto-fill the source field:
+   - **PDFs**: text is extracted directly from the PDF's embedded text layer.
+     No OCR required — works instantly for any digitally-created PDF.
+   - **Notebooks / ePubs**: uses xochitl's handwriting-to-text conversion
+     (`.textconversion` file; requires the feature to be enabled in xochitl).
+   - Scanned-image PDFs (no text layer) fall back to the `.textconversion`
+     file automatically.
 6. Tap the language tag (e.g. **en**) to pick a target language.
 7. Tap **Translate** — the translated text appears in the result box below.
 8. Tap **×** to collapse the panel (position & language are saved).

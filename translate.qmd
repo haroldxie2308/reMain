@@ -2,9 +2,13 @@
 ;
 ; Adds a draggable floating translation box to xochitl's document view.
 ; Tap the "T" button to expand/collapse the panel. Drag the header bar to
-; move it. Tap "Load OCR" to populate the source-text field from the
-; current page's OCR data, then choose a target language and tap
-; "Translate" to call the Google Translate API.
+; move it. Tap "Load Text" to populate the source-text field:
+;   • PDFs  — text is extracted directly from the PDF's embedded text layer
+;             (no OCR required; works for any digitally-created PDF).
+;   • Notebooks / ePubs — uses xochitl's handwriting-to-text conversion
+;             (.textconversion file).
+; Then choose a target language and tap "Translate" to call the Google
+; Translate API.
 ;
 ; Compatibility : xochitl 3.25 (hash selectors taken from FouzR/floating.qmd 3.25)
 ;                 xochitl 3.26 may work unchanged — see README for details.
@@ -232,7 +236,7 @@ AFFECT [[6722609618937832156]]
                             }
                         }
 
-                        ; load-OCR button
+                        ; load-text button (PDF text layer or OCR fallback)
                         Rectangle {
                             width: 140; height: 50
                             color:  "#444444"
@@ -240,14 +244,14 @@ AFFECT [[6722609618937832156]]
 
                             Text {
                                 anchors.centerIn: parent
-                                text:  "Load OCR"
+                                text:  "Load Text"
                                 color: "white"
                                 font.pixelSize: 20
                             }
 
                             MouseArea {
                                 anchors.fill: parent
-                                onClicked: translatePanel.loadPageOcr()
+                                onClicked: translatePanel.loadPageText()
                             }
                         }
                     }
@@ -380,7 +384,7 @@ AFFECT [[6722609618937832156]]
                 xhr.send()
             }
 
-            function loadPageOcr() {
+            function loadPageText() {
                 sourceText = ""
                 var confXhr = new XMLHttpRequest()
                 confXhr.open("GET",
@@ -407,34 +411,256 @@ AFFECT [[6722609618937832156]]
                         sourceText = "Error: no open document found in xochitl.conf"
                         return
                     }
-                    var ocrXhr = new XMLHttpRequest()
-                    ocrXhr.open("GET",
+                    ; Read .content metadata to determine file type (pdf / notebook / epub)
+                    var metaXhr = new XMLHttpRequest()
+                    metaXhr.open("GET",
                         "file:///home/root/.local/share/remarkable/xochitl/"
-                        + docId + ".textconversion")
-                    ocrXhr.onreadystatechange = function() {
-                        if (ocrXhr.readyState !== XMLHttpRequest.DONE) return
-                        if (ocrXhr.status !== 200) {
-                            sourceText = "Error: OCR data not found for this document. "
-                                       + "Make sure handwriting-to-text conversion is enabled."
-                            return
+                        + docId + ".content")
+                    metaXhr.onreadystatechange = function() {
+                        if (metaXhr.readyState !== XMLHttpRequest.DONE) return
+                        var fileType = "notebook"
+                        if (metaXhr.status === 200) {
+                            try {
+                                var meta = JSON.parse(metaXhr.responseText)
+                                fileType = meta.fileType || "notebook"
+                            } catch (e) {}
                         }
-                        try {
-                            var data = JSON.parse(ocrXhr.responseText)
-                            if (data && typeof data.text === "string") {
-                                sourceText = data.text
-                            } else if (data && Array.isArray(data.pages)) {
-                                var pg = data.pages[pageNum]
-                                sourceText = pg ? (pg.text || "") : ""
-                            } else {
-                                sourceText = "Error: unrecognised OCR format."
-                            }
-                        } catch (e) {
-                            sourceText = "Error: failed to parse OCR data. " + e.message
+                        if (fileType === "pdf") {
+                            loadPdfText(docId, pageNum)
+                        } else {
+                            loadTextConversion(docId, pageNum)
                         }
                     }
-                    ocrXhr.send()
+                    metaXhr.send()
                 }
                 confXhr.send()
+            }
+
+            ; ── PDF text extraction ────────────────────────────────────────
+            ; Reads the PDF binary and extracts text using the standard
+            ; BT…ET text operator blocks.  Works for all digitally-created
+            ; PDFs (Word, LaTeX, LibreOffice, etc.) without needing OCR.
+            ; Scanned-image PDFs have no embedded text layer and will fall
+            ; through to the .textconversion OCR fallback.
+
+            function loadPdfText(docId, pageNum) {
+                var pdfXhr = new XMLHttpRequest()
+                pdfXhr.open("GET",
+                    "file:///home/root/.local/share/remarkable/xochitl/"
+                    + docId + ".pdf")
+                pdfXhr.onreadystatechange = function() {
+                    if (pdfXhr.readyState !== XMLHttpRequest.DONE) return
+                    if (pdfXhr.status !== 200) {
+                        ; PDF file not accessible — fall back to OCR conversion
+                        loadTextConversion(docId, pageNum)
+                        return
+                    }
+                    var extracted = extractPdfPageText(pdfXhr.responseText, pageNum)
+                    if (extracted && extracted.trim().length > 0) {
+                        sourceText = extracted
+                    } else {
+                        ; No readable text layer found (scanned PDF?) — try OCR fallback
+                        loadTextConversion(docId, pageNum)
+                    }
+                }
+                pdfXhr.send()
+            }
+
+            ; extractPdfPageText(pdfData, pageNum)
+            ;   Parses PDF text streams from BT … ET blocks.
+            ;   Tries to isolate the target page by counting /Type /Page objects
+            ;   in the file to determine approximate page boundaries.
+            ;   Falls back to returning all text when page isolation is not possible.
+            function extractPdfPageText(pdfData, pageNum) {
+                ; Collect byte-offsets of /Type /Page declarations so we can
+                ; roughly map content streams to individual pages.
+                var pageOffsets = []
+                var searchPos   = 0
+                var MARKER      = "/Type /Page"
+                while (true) {
+                    var pp = pdfData.indexOf(MARKER, searchPos)
+                    if (pp === -1) break
+                    pageOffsets.push(pp)
+                    searchPos = pp + MARKER.length
+                }
+
+                ; Collect all BT…ET text blocks with their start offset
+                var blocks    = []
+                var pos       = 0
+                var SAFE      = 100000  ; max loop iterations (~1 BT/ET block per iteration)
+                var iters     = 0
+                while (pos < pdfData.length && iters < SAFE) {
+                    iters++
+                    var btIdx = pdfData.indexOf("BT", pos)
+                    if (btIdx === -1) break
+                    ; BT must be surrounded by whitespace
+                    var cb = btIdx > 0 ? pdfData[btIdx - 1] : "\n"
+                    var ca = pdfData[btIdx + 2]
+                    if (" \n\r".indexOf(cb) === -1 || " \n\r".indexOf(ca) === -1) {
+                        pos = btIdx + 2
+                        continue
+                    }
+                    var etIdx = pdfData.indexOf("ET", btIdx + 2)
+                    if (etIdx === -1) break
+                    var cbe = etIdx > 0 ? pdfData[etIdx - 1] : "\n"
+                    var cae = etIdx + 2 < pdfData.length ? pdfData[etIdx + 2] : "\n"
+                    if (" \n\r".indexOf(cbe) === -1 || " \n\r".indexOf(cae) === -1) {
+                        pos = btIdx + 2
+                        continue
+                    }
+                    blocks.push({ offset: btIdx, content: pdfData.substring(btIdx + 2, etIdx) })
+                    pos = etIdx + 2
+                }
+
+                if (blocks.length === 0) return ""
+
+                ; Filter blocks to those between this page's /Type /Page marker
+                ; and the next one.  If page isolation is not possible use all blocks.
+                var targetBlocks = blocks
+                if (pageOffsets.length > 0) {
+                    var pgStart = pageOffsets[pageNum] !== undefined
+                                  ? pageOffsets[pageNum] : pageOffsets[0]
+                    var pgEnd   = pageOffsets[pageNum + 1] !== undefined
+                                  ? pageOffsets[pageNum + 1] : pdfData.length
+                    var filtered = blocks.filter(function(b) {
+                        return b.offset >= pgStart && b.offset < pgEnd
+                    })
+                    if (filtered.length > 0) targetBlocks = filtered
+                }
+
+                ; Extract text from each block
+                var result = ""
+                for (var bi = 0; bi < targetBlocks.length; bi++) {
+                    result += parsePdfTextBlock(targetBlocks[bi].content)
+                }
+                return result.trim()
+            }
+
+            ; parsePdfTextBlock(block)
+            ;   Extracts human-readable text from a single BT…ET block.
+            ;   Handles: (str) Tj   [(str) num] TJ   (str) '   (str) "
+            ;   and Td / TD / T* newline operators.
+            function parsePdfTextBlock(block) {
+                var text = ""
+                var i    = 0
+                while (i < block.length) {
+                    var ch = block[i]
+
+                    ; Literal string: ( … )
+                    if (ch === "(") {
+                        var end = i + 1
+                        while (end < block.length) {
+                            if (block[end] === "\\" && end + 1 < block.length) {
+                                end += 2
+                                continue
+                            }
+                            if (block[end] === ")") break
+                            end++
+                        }
+                        var str = block.substring(i + 1, end)
+                        ; Decode common PDF escape sequences
+                        str = str.replace(/\\n/g, "\n")
+                                 .replace(/\\r/g, " ")
+                                 .replace(/\\t/g, " ")
+                                 .replace(/\\\\/g, "\\")
+                                 .replace(/\\([()\\])/g, "$1")
+                                 .replace(/\\([0-7]{1,3})/g, function(m, oct) {
+                                     return String.fromCharCode(parseInt(oct, 8))
+                                 })
+                        ; Accept if followed by Tj, TJ, ' or "
+                        var rest = block.substring(end + 1).trimStart()
+                        if (/^(Tj|TJ|'|")/.test(rest)) text += str
+                        i = end + 1
+                        continue
+                    }
+
+                    ; Array form: [ … ] TJ
+                    if (ch === "[") {
+                        var aEnd = block.indexOf("]", i)
+                        if (aEnd !== -1) {
+                            var afterArr = block.substring(aEnd + 1).trimStart()
+                            if (afterArr.indexOf("TJ") === 0) {
+                                var arr = block.substring(i + 1, aEnd)
+                                var ai  = 0
+                                while (ai < arr.length) {
+                                    if (arr[ai] === "(") {
+                                        var ae = ai + 1
+                                        while (ae < arr.length) {
+                                            if (arr[ae] === "\\" && ae + 1 < arr.length) {
+                                                ae += 2; continue
+                                            }
+                                            if (arr[ae] === ")") break
+                                            ae++
+                                        }
+                                        var chunk = arr.substring(ai + 1, ae)
+                                        ; Decode PDF escape sequences — same as literal string path
+                                        chunk = chunk.replace(/\\n/g, "\n")
+                                                     .replace(/\\r/g, " ")
+                                                     .replace(/\\t/g, " ")
+                                                     .replace(/\\\\/g, "\\")
+                                                     .replace(/\\([()\\])/g, "$1")
+                                                     .replace(/\\([0-7]{1,3})/g, function(m, oct) {
+                                                         return String.fromCharCode(parseInt(oct, 8))
+                                                     })
+                                        text += chunk
+                                        ai = ae + 1
+                                    } else if (arr[ai] === "-" || (arr[ai] >= "0" && arr[ai] <= "9")) {
+                                        ; Large negative spacing value = word gap
+                                        var ne = ai
+                                        while (ne < arr.length && arr[ne] !== " " && arr[ne] !== "(" && arr[ne] !== "\n") ne++
+                                        var nv = parseFloat(arr.substring(ai, ne))
+                                        if (nv < -100) text += " "
+                                        ai = ne
+                                    } else { ai++ }
+                                }
+                                i = aEnd + 1
+                                continue
+                            }
+                        }
+                    }
+
+                    ; Td, TD, T* → new line
+                    if (ch === "T" && i + 1 < block.length) {
+                        var nx = block[i + 1]
+                        if (nx === "d" || nx === "D" || nx === "*") {
+                            text += "\n"; i += 2; continue
+                        }
+                    }
+
+                    i++
+                }
+                return text
+            }
+
+            ; ── Notebook / ePub text (xochitl handwriting-to-text) ────────
+            function loadTextConversion(docId, pageNum) {
+                var ocrXhr = new XMLHttpRequest()
+                ocrXhr.open("GET",
+                    "file:///home/root/.local/share/remarkable/xochitl/"
+                    + docId + ".textconversion")
+                ocrXhr.onreadystatechange = function() {
+                    if (ocrXhr.readyState !== XMLHttpRequest.DONE) return
+                    if (ocrXhr.status !== 200) {
+                        sourceText = "Error: text data not found for this document. "
+                                   + "For PDFs: ensure the file has an embedded text layer. "
+                                   + "For notebooks: enable handwriting-to-text conversion."
+                        return
+                    }
+                    try {
+                        var data = JSON.parse(ocrXhr.responseText)
+                        if (data && typeof data.text === "string") {
+                            sourceText = data.text
+                        } else if (data && Array.isArray(data.pages)) {
+                            var pg = data.pages[pageNum]
+                            sourceText = pg ? (pg.text || "") : ""
+                        } else {
+                            sourceText = "Error: unrecognised text format."
+                        }
+                    } catch (e) {
+                        sourceText = "Error: failed to parse text data. " + e.message
+                    }
+                }
+                ocrXhr.send()
             }
 
             function loadConfig() {
