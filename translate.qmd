@@ -25,7 +25,7 @@ AFFECT [[11313888899523275277]]
                     ~&214641332312&~: !!~&7712934851008712&~ && ~&6504254477&~.~&4367731859579753176&~ > 7
 
                     ~&254542253295368380&~: {
-                        ~&6504254477&~.translatePanelVisible = !~&6504254477&~.translatePanelVisible;
+                        translatePanel.togglePanelFromToolbar()
                     }
                 }
             }
@@ -43,11 +43,12 @@ AFFECT [[1224665461898798997]]
                 visible: ~&233745975898428&~.translatePanelVisible
                 x: ~&233745975898428&~.translatePanelX
                 y: ~&233745975898428&~.translatePanelY
-                width: 760
-                height: bodyVisible ? 700 : 106
+                width: collapsed ? 60 : 760
+                height: collapsed ? 60 : 700
                 z: 1000
+                clip: true
 
-                property bool bodyVisible: true
+                property bool collapsed: false
                 property bool loading: false
                 property string sourceText: ""
                 property string translatedText: ""
@@ -68,6 +69,31 @@ AFFECT [[1224665461898798997]]
 
                 CommandExecutor {
                     id: translateCommandExecutor
+                }
+
+                function showTranslationPanel() {
+                    collapsed = false
+                }
+
+                function collapseToIcon() {
+                    collapsed = true
+                    saveConfig()
+                }
+
+                function expandFromIcon() {
+                    collapsed = false
+                    saveConfig()
+                }
+
+                function togglePanelFromToolbar() {
+                    if (~&233745975898428&~.translatePanelVisible) {
+                        ~&233745975898428&~.translatePanelVisible = false
+                        saveConfig()
+                        return
+                    }
+                    showTranslationPanel()
+                    ~&233745975898428&~.translatePanelVisible = true
+                    saveConfig()
                 }
 
                 function normalizeDisplayText(newText) {
@@ -235,24 +261,26 @@ AFFECT [[1224665461898798997]]
                 }
 
                 Rectangle {
+                    visible: !translatePanel.collapsed
                     anchors.fill: parent
                     color: "white"
                     border.color: "black"
                     border.width: 2
-                    radius: 10
+                    radius: 0
                     clip: true
                 }
 
                 Rectangle {
                     id: translateHeader
+                    visible: !translatePanel.collapsed
                     width: parent.width
-                    height: 90
+                    height: 60
                     color: "black"
-                    radius: 10
+                    radius: 0
 
                     MouseArea {
                         anchors.fill: parent
-                        anchors.rightMargin: 320
+                        anchors.rightMargin: 90
 
                         property real pressX: 0
                         property real pressY: 0
@@ -277,25 +305,33 @@ AFFECT [[1224665461898798997]]
                     }
 
                     Rectangle {
-                        anchors.bottom: parent.bottom
-                        width: parent.width
-                        height: 12
-                        color: parent.color
-                    }
-
-                    Text {
                         anchors.left: parent.left
-                        anchors.leftMargin: 18
+                        anchors.leftMargin: 0
                         anchors.verticalCenter: parent.verticalCenter
-                        text: "Translate"
-                        color: "white"
-                        font.pixelSize: 34
-                        font.bold: true
+                        width: 60
+                        height: 60
+                        radius: 0
+                        color: "black"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "<>"
+                            color: "white"
+                            font.pixelSize: 34
+                            font.bold: true
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                translatePanel.collapseToIcon()
+                            }
+                        }
                     }
 
                     Row {
-                        anchors.right: foldButton.left
-                        anchors.rightMargin: 12
+                        anchors.right: parent.right
+                        anchors.rightMargin: 18
                         anchors.verticalCenter: parent.verticalCenter
                         spacing: 10
 
@@ -343,70 +379,13 @@ AFFECT [[1224665461898798997]]
                             }
                         }
                     }
-
-                    Rectangle {
-                        id: foldButton
-                        anchors.top: parent.top
-                        anchors.right: parent.right
-                        anchors.topMargin: 16
-                        anchors.rightMargin: 18
-                        width: 60
-                        height: 60
-                        radius: 30
-                        color: "black"
-
-                        Item {
-                            anchors.centerIn: parent
-                            width: 24
-                            height: 16
-                            rotation: translatePanel.bodyVisible ? 180 : 0
-
-                            Rectangle {
-                                width: 14
-                                height: 4
-                                radius: 2
-                                color: "white"
-                                anchors.left: parent.left
-                                anchors.bottom: parent.bottom
-                                rotation: 35
-                                transformOrigin: Item.Left
-                            }
-
-                            Rectangle {
-                                width: 14
-                                height: 4
-                                radius: 2
-                                color: "white"
-                                anchors.right: parent.right
-                                anchors.bottom: parent.bottom
-                                rotation: -35
-                                transformOrigin: Item.Right
-                            }
-                        }
-
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                translatePanel.bodyVisible = !translatePanel.bodyVisible
-                                translatePanel.saveConfig()
-                            }
-                        }
-                    }
-
-                    Rectangle {
-                        anchors.right: parent.right
-                        anchors.bottom: parent.bottom
-                        width: 110
-                        height: 12
-                        color: parent.color
-                    }
                 }
 
                 Column {
                     id: translateBody
-                    visible: translatePanel.bodyVisible
+                    visible: !translatePanel.collapsed
                     anchors.top: translateHeader.bottom
-                    anchors.topMargin: 14
+                    anchors.topMargin: 0
                     anchors.left: parent.left
                     anchors.right: parent.right
                     anchors.bottom: parent.bottom
@@ -420,7 +399,7 @@ AFFECT [[1224665461898798997]]
                         height: parent.height
                         color: "white"
                         border.width: 0
-                        radius: 6
+                        radius: 0
 
                         Flickable {
                             anchors.fill: parent
@@ -437,6 +416,59 @@ AFFECT [[1224665461898798997]]
                                 font.pixelSize: 24
                                 color: "black"
                             }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    id: foldedIcon
+                    visible: translatePanel.collapsed
+                    width: parent.width
+                    height: parent.height
+                    radius: 0
+                    color: "black"
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "<>"
+                        color: "white"
+                        font.pixelSize: 34
+                        font.bold: true
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+
+                        property real pressX: 0
+                        property real pressY: 0
+                        property real startPanelX: 0
+                        property real startPanelY: 0
+                        property bool dragged: false
+
+                        onPressed: function(mouse) {
+                            pressX = mouse.x
+                            pressY = mouse.y
+                            startPanelX = ~&233745975898428&~.translatePanelX
+                            startPanelY = ~&233745975898428&~.translatePanelY
+                            dragged = false
+                        }
+
+                        onPositionChanged: function(mouse) {
+                            var dx = mouse.x - pressX
+                            var dy = mouse.y - pressY
+                            if (!dragged && (dx > 4 || dx < -4 || dy > 4 || dy < -4))
+                                dragged = true
+                            ~&233745975898428&~.translatePanelX = startPanelX + dx
+                            ~&233745975898428&~.translatePanelY = startPanelY + dy
+                        }
+
+                        onReleased: {
+                            translatePanel.saveConfig()
+                        }
+
+                        onClicked: {
+                            if (dragged) return
+                            translatePanel.expandFromIcon()
                         }
                     }
                 }
@@ -1064,7 +1096,7 @@ AFFECT [[1224665461898798997]]
                         if (xhr.status !== 200) return
                         try {
                             var cfg = JSON.parse(xhr.responseText)
-                            if (cfg.bodyVisible !== undefined) bodyVisible = cfg.bodyVisible
+                            if (cfg.collapsed !== undefined) collapsed = cfg.collapsed
                             if (cfg.sourceLang !== undefined) sourceLang = cfg.sourceLang
                             if (cfg.targetLang !== undefined) targetLang = cfg.targetLang
                             if (cfg.x !== undefined) ~&233745975898428&~.translatePanelX = cfg.x
@@ -1086,7 +1118,7 @@ AFFECT [[1224665461898798997]]
                         }
                     }
                     xhr.send(JSON.stringify({
-                        bodyVisible: bodyVisible,
+                        collapsed: collapsed,
                         sourceLang: sourceLang,
                         targetLang: targetLang,
                         x: ~&233745975898428&~.translatePanelX,
