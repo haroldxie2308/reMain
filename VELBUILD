@@ -18,7 +18,7 @@ source="
     https://raw.githubusercontent.com/haroldxie2308/reMain/${_commit}/native-helper/build/translate-pdf-cli.aarch64
     https://raw.githubusercontent.com/haroldxie2308/reMain/${_commit}/LICENSE
 "
-options="!check !fhs !tracedeps"
+options="!check !fhs !tracedeps !strip"
 
 package() {
     install -Dm644 "$srcdir"/translate.qmd \

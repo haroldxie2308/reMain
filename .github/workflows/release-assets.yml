@@ -83,6 +83,7 @@ jobs:
           text = path.read_text()
           text = re.sub(r'^pkgver=.*$', f'pkgver={os.environ["PKGVER"]}', text, flags=re.M)
           text = re.sub(r'^_commit=.*$', f'_commit="{os.environ["TAG_NAME"]}"', text, flags=re.M)
+          text = re.sub(r'^options=.*$', 'options="!check !fhs !tracedeps !strip"', text, flags=re.M)
           path.write_text(text)
           PY
 
