@@ -1,0 +1,80 @@
+name: Release Assets
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    env:
+      TAG_NAME: ${{ github.event.release.tag_name }}
+      GH_TOKEN: ${{ github.token }}
+      VELLUM_SIGNING_KEY: ${{ secrets.VELLUM_SIGNING_KEY }}
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Validate signing key secret
+        run: |
+          if [ -z "$VELLUM_SIGNING_KEY" ]; then
+            echo "Missing VELLUM_SIGNING_KEY GitHub Actions secret" >&2
+            exit 1
+          fi
+
+      - name: Prepare version variables
+        run: |
+          echo "PKGVER=${TAG_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Clone vellum build repo
+        run: |
+          git clone --depth 1 https://github.com/vellum-dev/vellum /tmp/vellum
+          mkdir -p /tmp/vellum/packages/page-translator
+          cp VELBUILD /tmp/vellum/packages/page-translator/VELBUILD
+
+      - name: Install signing key
+        run: |
+          mkdir -p /tmp/vellum/keys
+          printf '%s' "$VELLUM_SIGNING_KEY" > /tmp/vellum/keys/vellum-dev.rsa
+          chmod 600 /tmp/vellum/keys/vellum-dev.rsa
+          openssl rsa -in /tmp/vellum/keys/vellum-dev.rsa -pubout > /tmp/vellum/keys/vellum-dev.rsa.pub
+          diff -u keys/vellum-dev.rsa.pub /tmp/vellum/keys/vellum-dev.rsa.pub
+
+      - name: Patch VELBUILD version and commit
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+          path = Path("/tmp/vellum/packages/page-translator/VELBUILD")
+          text = path.read_text()
+          text = re.sub(r'^pkgver=.*$', f'pkgver={os.environ["PKGVER"]}', text, flags=re.M)
+          text = re.sub(r'^_commit=.*$', f'_commit="{os.environ["TAG_NAME"]}"', text, flags=re.M)
+          path.write_text(text)
+          PY
+
+      - name: Update checksums
+        run: |
+          cd /tmp/vellum
+          ./scripts/update-checksums.sh page-translator
+
+      - name: Build package
+        run: |
+          cd /tmp/vellum
+          ./scripts/build-package.sh page-translator aarch64
+
+      - name: Collect release assets
+        run: |
+          mkdir -p /tmp/release-assets
+          cp /tmp/vellum/dist/aarch64/page-translator-${PKGVER}-r0.apk /tmp/release-assets/
+          cp /tmp/vellum/keys/vellum-dev.rsa.pub /tmp/release-assets/
+          ls -l /tmp/release-assets
+
+      - name: Upload assets to GitHub release
+        run: |
+          gh release upload "$TAG_NAME" /tmp/release-assets/* --clobber

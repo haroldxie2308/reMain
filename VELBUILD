@@ -1,6 +1,6 @@
-maintainer="haroldxie2308"
+maintainer="Harold Xie <haroldxie2308@users.noreply.github.com>"
 pkgname=page-translator
-pkgver=0.2.0
+pkgver=0.2.1
 pkgrel=0
 upstream_author="haroldxie2308"
 category="ui"
@@ -12,13 +12,13 @@ license="MIT"
 depends="qt-resource-rebuilder qt-command-executor"
 optdepends="remarkable-os>=3.26: tested on reMarkable OS 3.26"
 
-_commit="v0.2.0"
+_commit="v0.2.1"
 source="
     https://raw.githubusercontent.com/haroldxie2308/reMain/${_commit}/translate.qmd
     https://raw.githubusercontent.com/haroldxie2308/reMain/${_commit}/native-helper/build/translate-pdf-cli.aarch64
     https://raw.githubusercontent.com/haroldxie2308/reMain/${_commit}/LICENSE
 "
-options="!check !fhs"
+options="!check !fhs !tracedeps"
 
 package() {
     install -Dm644 "$srcdir"/translate.qmd \
@@ -32,3 +32,9 @@ package() {
     echo "https://github.com/haroldxie2308/reMain" \
         > "$pkgdir"/home/root/.vellum/licenses/$pkgname/SOURCES
 }
+
+sha512sums="
+feec0da14e5177763f8efe7ededd2799e510e22d389194c4df4bd0e436ddb21f1e3d7b3d509739c61dad42f461b284e262ae7b0c16f4bc4d928dbedc87355e36  translate.qmd
+571451147eaff0b06b38d50af897bed4dd13ef04053943423f2211178fe6737c739bd2a6c489775ab54aab79baee11d86cf40472f7afc0f98b1be50929eda162  translate-pdf-cli.aarch64
+45c77b7aaca8f8b294f81bf101594bdfd95480519899d00530bd328bbdbca78b74d79913a332f625c433f6fe059c7e19b4b4f2852bf7d52ac49fb26454d770c5  LICENSE
+"

@@ -48,9 +48,19 @@ mix of cached section slicing and sibling-PDF fallback.
 
 ## Install With Vellum
 
+For this self-hosted release, install from the release `.apk`, not from the raw
+`VELBUILD`.
+
+1. Download these two release assets:
+- `page-translator-0.2.1-r0.apk`
+- [`vellum-dev.rsa.pub`](/Volumes/Local/reMain/keys/vellum-dev.rsa.pub)
+
+2. Copy them to the tablet and install:
+
 ```sh
-vellum add https://raw.githubusercontent.com/haroldxie2308/reMain/v0.2.0/VELBUILD
-vellum install page-translator
+mkdir -p /home/root/.vellum/etc/apk/keys
+cp vellum-dev.rsa.pub /home/root/.vellum/etc/apk/keys/
+vellum add page-translator-0.2.1-r0.apk
 /home/root/xovi/start >/dev/null 2>&1 &
 ```
 
@@ -100,10 +110,12 @@ the target OS release. The checked-in package artifact is:
 - [`native-helper/build/translate-pdf-cli.aarch64`](/Volumes/Local/reMain/native-helper/build/translate-pdf-cli.aarch64): packaged helper binary
 - [`extract_epub_cache.sh`](/Volumes/Local/reMain/extract_epub_cache.sh): optional EPUB cache generator used by the fallback path
 - [`docs/native-helper-design.md`](/Volumes/Local/reMain/docs/native-helper-design.md): helper notes
+- [`keys/vellum-dev.rsa.pub`](/Volumes/Local/reMain/keys/vellum-dev.rsa.pub): public key for the release package
 
 ## Releasing
 
-This repo is already structured for a vellum install. The release flow is:
+This repo is structured for self-hosted vellum releases via release assets. The
+release flow is:
 
 1. Build or verify the packaged helper:
 
@@ -120,31 +132,65 @@ with the reMarkable SDK before releasing.
 - `_commit="vX.Y.Z"`
 
 The `_commit` value should match the Git tag you are about to create. That is
-what makes a tagged vellum install reproducible.
+what makes the source package reproducible.
 
-3. Commit the release prep.
+3. Build the signed `.apk` and keep the private signing key outside the repo.
 
-4. Create the tag locally:
+4. Commit the release prep.
+
+5. Create the tag locally:
 
 ```sh
-git tag v0.2.0
+git tag v0.2.1
 ```
 
-5. Push the branch and tag together:
+6. Push the branch and tag together:
 
 ```sh
-git push origin main v0.2.0
+git push origin main v0.2.1
 ```
 
-6. Create a GitHub release for that tag.
+7. Publish a GitHub release for that tag.
 
-7. Test the tagged vellum install on a tablet:
+If release automation is configured, the workflow will attach:
+
+- `page-translator-0.2.1-r0.apk`
+- `vellum-dev.rsa.pub`
+
+If release automation is not configured yet, attach those two files manually.
+
+8. Test the release install on a tablet:
 
 ```sh
-vellum add https://raw.githubusercontent.com/haroldxie2308/reMain/v0.2.0/VELBUILD
-vellum install page-translator
+mkdir -p /home/root/.vellum/etc/apk/keys
+cp vellum-dev.rsa.pub /home/root/.vellum/etc/apk/keys/
+vellum add page-translator-0.2.1-r0.apk
 /home/root/xovi/start >/dev/null 2>&1 &
 ```
+
+## Release Automation
+
+GitHub Actions can attach the release assets automatically when you publish a
+GitHub release.
+
+The workflow expects one repository secret:
+
+- `VELLUM_SIGNING_KEY`: the private RSA key that signs the `.apk`
+
+Create it under GitHub:
+
+- `Settings -> Secrets and variables -> Actions -> New repository secret`
+
+The matching public key is tracked at
+[`keys/vellum-dev.rsa.pub`](/Volumes/Local/reMain/keys/vellum-dev.rsa.pub). The
+workflow derives a public key from the secret and fails if it does not match the
+tracked public key.
+
+Once that secret is set, publishing a GitHub release will automatically:
+
+- build `page-translator-<version>-r0.apk`
+- upload the `.apk`
+- upload `vellum-dev.rsa.pub`
 
 ## Notes
 
@@ -153,6 +199,8 @@ vellum install page-translator
 - The current panel defaults to automatic source-language detection.
 - If `qt-resource-rebuilder` selectors drift on a future OS release, the hash
   targets in `translate.qmd` will need to be refreshed.
+- Only the public key should be committed or attached to releases. Keep the
+  private signing key local and backed up safely.
 
 ## License
 
