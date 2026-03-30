@@ -287,6 +287,64 @@ AFFECT [[1224665461898798997]]
                     return " "
                 }
 
+                function isContextSeparatorChar(ch) {
+                    if (!ch || !ch.length) return false
+                    var code = ch.charCodeAt(0)
+                    if (ch === " " || ch === "\n" || ch === "\r" || ch === "\t")
+                        return true
+                    return ch === "." || ch === "," || ch === "!" || ch === "?" ||
+                           ch === ":" || ch === ";" || code === 12290 ||
+                           code === 65292 || code === 65281 || code === 65311 ||
+                           code === 65307 || code === 65306
+                }
+
+                function contextPrefixFromPreviousPage(text) {
+                    var trimmed = translatePanel.trimString((text || "").replace(/\r/g, "\n"))
+                    var i = trimmed.length - 1
+                    while (i >= 0) {
+                        if (translatePanel.isContextSeparatorChar(trimmed[i]))
+                            return translatePanel.trimString(trimmed.substring(i + 1))
+                        i--
+                    }
+                    return trimmed
+                }
+
+                function contextSuffixFromNextPage(text) {
+                    var trimmed = translatePanel.trimString((text || "").replace(/\r/g, "\n"))
+                    var i = 0
+                    while (i < trimmed.length) {
+                        if (translatePanel.isContextSeparatorChar(trimmed[i]))
+                            return translatePanel.trimString(trimmed.substring(0, i + 1))
+                        i++
+                    }
+                    return trimmed
+                }
+
+                function expandPdfPageToSentenceBoundaries(prevText, currentText, nextText) {
+                    var merged = translatePanel.trimString(currentText || "")
+                    var prefix = translatePanel.contextPrefixFromPreviousPage(prevText)
+                    var suffix = translatePanel.contextSuffixFromNextPage(nextText)
+
+                    if (prefix.length > 0 && (merged.length === 0 || !translatePanel.isContextSeparatorChar(merged[0]))) {
+                        if (merged.length > 0) {
+                            merged = prefix + translatePanel.chooseInlineJoiner(prefix[prefix.length - 1], merged[0]) + merged
+                        } else {
+                            merged = prefix
+                        }
+                    }
+
+                    if (suffix.length > 0 &&
+                        (merged.length === 0 || !translatePanel.isContextSeparatorChar(merged[merged.length - 1]))) {
+                        if (merged.length > 0) {
+                            merged += translatePanel.chooseInlineJoiner(merged[merged.length - 1], suffix[0]) + suffix
+                        } else {
+                            merged = suffix
+                        }
+                    }
+
+                    return translatePanel.trimString(merged)
+                }
+
                 function setSourceText(newText) {
                     sourceText = normalizeDisplayText(newText)
                 }
@@ -684,8 +742,11 @@ AFFECT [[1224665461898798997]]
                     confXhr.send()
                 }
 
-                function loadPdfText(docId, pageNum) {
-                    var pdfPath = "/home/root/.local/share/remarkable/xochitl/" + docId + ".pdf"
+                function extractPdfPageText(pdfPath, pageNum) {
+                    if (pageNum < 0) {
+                        return { text: "", error: "page out of range" }
+                    }
+
                     var rawResult = translateCommandExecutor.executeCommand(
                         "/home/root/xovi/bin/translate-pdf-cli",
                         [pdfPath, String(pageNum)]
@@ -700,8 +761,7 @@ AFFECT [[1224665461898798997]]
                         var parsedStdout = parsed.stdout ? String(parsed.stdout) : ""
                         var parsedStderr = parsed.stderr ? String(parsed.stderr) : ""
                         if (parsedStdout.trim().length > 0) {
-                            translatePanel.applyLoadedText(parsedStdout)
-                            return
+                            return { text: parsedStdout, error: "" }
                         }
 
                         var parsedErr = parsedStderr.trim()
@@ -709,8 +769,7 @@ AFFECT [[1224665461898798997]]
                             parsedErr = "translate-pdf-cli failed with exit code " + parsed.exitCode + "."
                         if (!parsedErr)
                             parsedErr = "translate-pdf-cli produced no output."
-                        translatePanel.setLoadError("Error: " + parsedErr)
-                        return
+                        return { text: "", error: parsedErr }
                     }
 
                     var lines = rawText.replace(/\r/g, "").split("\n")
@@ -737,14 +796,36 @@ AFFECT [[1224665461898798997]]
                         li++
                     }
 
-                    if (visibleText.trim().length > 0) {
-                        translatePanel.applyLoadedText(visibleText)
-                        return
-                    }
+                    if (visibleText.trim().length > 0)
+                        return { text: visibleText, error: "" }
 
                     if (!errText.length)
                         errText = "translate-pdf-cli produced no output."
-                    translatePanel.setLoadError("Error: " + errText)
+                    return { text: "", error: errText }
+                }
+
+                function loadPdfText(docId, pageNum) {
+                    var pdfPath = "/home/root/.local/share/remarkable/xochitl/" + docId + ".pdf"
+                    var currentPage = translatePanel.extractPdfPageText(pdfPath, pageNum)
+                    if (!currentPage.text || !currentPage.text.trim().length) {
+                        translatePanel.setLoadError("Error: " + (currentPage.error || "translate-pdf-cli produced no output."))
+                        return
+                    }
+
+                    var prevPage = { text: "", error: "" }
+                    var nextPage = { text: "", error: "" }
+                    if (pageNum > 0)
+                        prevPage = translatePanel.extractPdfPageText(pdfPath, pageNum - 1)
+                    nextPage = translatePanel.extractPdfPageText(pdfPath, pageNum + 1)
+
+                    var expandedText = translatePanel.expandPdfPageToSentenceBoundaries(
+                        prevPage.text || "",
+                        currentPage.text || "",
+                        nextPage.text || ""
+                    )
+                    if (!expandedText.length)
+                        expandedText = currentPage.text
+                    translatePanel.applyLoadedText(expandedText)
                 }
 
                 function loadPlainTextFile(fileUrl, missingMessage) {
@@ -1043,7 +1124,7 @@ AFFECT [[1224665461898798997]]
                     return out
                 }
 
-                function extractPdfPageText(pdfData, pageNum) {
+                function extractPdfPageTextLegacy(pdfData, pageNum) {
                     var pageOffsets = []
                     var searchPos = 0
                     var marker = "/Type /Page"
