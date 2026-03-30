@@ -5,10 +5,11 @@ Floating page translation for reMarkable documents.
 The plugin adds a small camera-style button to the document toolbar. Tapping it
 opens a draggable translation panel with:
 
-- `Translate` header
-- `To` language rotation: `KR -> CN -> EN`
+- `<>` fold handle in the header
+- `To` language rotation:
+  `KR -> CN -> EN -> JP -> ES -> FR -> DE -> IT -> PT -> RU`
 - `Refresh` to read the current page and translate it in one step
-- fold/unfold chevron
+- fold into a small square and unfold again from that square
 
 The current UI is black/white only and shows translated text only.
 
@@ -16,6 +17,7 @@ The current UI is black/white only and shows translated text only.
 
 - PDF page extraction: working
 - Translation flow: working
+- PDF context expansion across page boundaries: working
 - EPUB support: still fallback-heavy and not the main focus
 - Tested on reMarkable Paper Pro, reMarkable OS `3.26.0.68`
 
@@ -29,6 +31,8 @@ For PDFs, the patch calls a small native helper through
 
 - QML calls `/home/root/xovi/bin/translate-pdf-cli`
 - the helper extracts text from the current PDF page
+- QML also reads `page - 1` and `page + 1` and extends to nearby separators so
+  a sentence that crosses the page boundary is less likely to be cut off
 - QML sends that text to `translate.googleapis.com`
 - the translated result is shown in the floating panel
 
@@ -45,7 +49,7 @@ mix of cached section slicing and sibling-PDF fallback.
 ## Install With Vellum
 
 ```sh
-vellum add https://github.com/haroldxie2308/reMain/raw/main/VELBUILD
+vellum add https://raw.githubusercontent.com/haroldxie2308/reMain/v1.2.0/VELBUILD
 vellum install page-translator
 /home/root/xovi/start >/dev/null 2>&1 &
 ```
@@ -70,7 +74,7 @@ ssh rmpp 'chmod 755 /home/root/xovi/bin/translate-pdf-cli && /home/root/xovi/sta
 3. Tap `Refresh`.
 4. Read the translated text.
 5. Tap `To` to rotate target language.
-6. Tap the chevron to fold or unfold the panel.
+6. Tap `<>` to fold the panel, or tap the folded square to reopen it.
 
 The camera button remains the open/close toggle for the whole panel.
 
@@ -96,6 +100,51 @@ the target OS release. The checked-in package artifact is:
 - [`native-helper/build/translate-pdf-cli.aarch64`](/Volumes/Local/reMain/native-helper/build/translate-pdf-cli.aarch64): packaged helper binary
 - [`extract_epub_cache.sh`](/Volumes/Local/reMain/extract_epub_cache.sh): optional EPUB cache generator used by the fallback path
 - [`docs/native-helper-design.md`](/Volumes/Local/reMain/docs/native-helper-design.md): helper notes
+
+## Releasing
+
+This repo is already structured for a vellum install. The release flow is:
+
+1. Build or verify the packaged helper:
+
+```sh
+make -C native-helper host-cli
+```
+
+If the native helper changed, rebuild `native-helper/build/translate-pdf-cli.aarch64`
+with the reMarkable SDK before releasing.
+
+2. Bump the version in [`VELBUILD`](/Volumes/Local/reMain/VELBUILD):
+
+- `pkgver=...`
+- `_commit="vX.Y.Z"`
+
+The `_commit` value should match the Git tag you are about to create. That is
+what makes a tagged vellum install reproducible.
+
+3. Commit the release prep.
+
+4. Create the tag locally:
+
+```sh
+git tag v1.2.0
+```
+
+5. Push the branch and tag together:
+
+```sh
+git push origin main v1.2.0
+```
+
+6. Create a GitHub release for that tag.
+
+7. Test the tagged vellum install on a tablet:
+
+```sh
+vellum add https://raw.githubusercontent.com/haroldxie2308/reMain/v1.2.0/VELBUILD
+vellum install page-translator
+/home/root/xovi/start >/dev/null 2>&1 &
+```
 
 ## Notes
 

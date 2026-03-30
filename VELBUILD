@@ -1,6 +1,6 @@
 maintainer="haroldxie2308"
 pkgname=page-translator
-pkgver=1.1.0
+pkgver=1.2.0
 pkgrel=0
 upstream_author="haroldxie2308"
 category="ui"
@@ -12,7 +12,7 @@ license="MIT"
 depends="qt-resource-rebuilder qt-command-executor"
 optdepends="remarkable-os>=3.26: tested on reMarkable OS 3.26"
 
-_commit="main"
+_commit="v1.2.0"
 source="
     https://raw.githubusercontent.com/haroldxie2308/reMain/${_commit}/translate.qmd
     https://raw.githubusercontent.com/haroldxie2308/reMain/${_commit}/native-helper/build/translate-pdf-cli.aarch64
