@@ -3,6 +3,12 @@ name: Release Assets
 on:
   release:
     types: [published]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Release tag to build and upload assets for
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -11,7 +17,7 @@ jobs:
   build-and-upload:
     runs-on: ubuntu-latest
     env:
-      TAG_NAME: ${{ github.event.release.tag_name }}
+      TAG_NAME: ${{ github.event.inputs.tag_name || github.event.release.tag_name }}
       GH_TOKEN: ${{ github.token }}
       VELLUM_SIGNING_KEY: ${{ secrets.VELLUM_SIGNING_KEY }}
     steps:
@@ -30,6 +36,17 @@ jobs:
       - name: Prepare version variables
         run: |
           echo "PKGVER=${TAG_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install vbuild
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install git+https://github.com/Eeems/vbuild.git
+          vbuild --help >/dev/null
 
       - name: Clone vellum build repo
         run: |
