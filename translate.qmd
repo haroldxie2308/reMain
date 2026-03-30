@@ -72,7 +72,14 @@ AFFECT [[1224665461898798997]]
                 property var targetLangs: [
                     { code: "ko", label: "KR" },
                     { code: "zh-CN", label: "CN" },
-                    { code: "en", label: "EN" }
+                    { code: "en", label: "EN" },
+                    { code: "ja", label: "JP" },
+                    { code: "es", label: "ES" },
+                    { code: "fr", label: "FR" },
+                    { code: "de", label: "DE" },
+                    { code: "it", label: "IT" },
+                    { code: "pt", label: "PT" },
+                    { code: "ru", label: "RU" }
                 ]
 
                 CommandExecutor {
