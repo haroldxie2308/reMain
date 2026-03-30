@@ -49,7 +49,7 @@ mix of cached section slicing and sibling-PDF fallback.
 ## Install With Vellum
 
 ```sh
-vellum add https://raw.githubusercontent.com/haroldxie2308/reMain/v1.2.0/VELBUILD
+vellum add https://raw.githubusercontent.com/haroldxie2308/reMain/v0.2.0/VELBUILD
 vellum install page-translator
 /home/root/xovi/start >/dev/null 2>&1 &
 ```
@@ -127,13 +127,13 @@ what makes a tagged vellum install reproducible.
 4. Create the tag locally:
 
 ```sh
-git tag v1.2.0
+git tag v0.2.0
 ```
 
 5. Push the branch and tag together:
 
 ```sh
-git push origin main v1.2.0
+git push origin main v0.2.0
 ```
 
 6. Create a GitHub release for that tag.
@@ -141,7 +141,7 @@ git push origin main v1.2.0
 7. Test the tagged vellum install on a tablet:
 
 ```sh
-vellum add https://raw.githubusercontent.com/haroldxie2308/reMain/v1.2.0/VELBUILD
+vellum add https://raw.githubusercontent.com/haroldxie2308/reMain/v0.2.0/VELBUILD
 vellum install page-translator
 /home/root/xovi/start >/dev/null 2>&1 &
 ```
