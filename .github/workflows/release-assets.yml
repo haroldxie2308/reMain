@@ -42,10 +42,21 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install vbuild
+      - name: Install vbuild from source
         run: |
           python -m pip install --upgrade pip
-          python -m pip install git+https://github.com/Eeems/vbuild.git
+          git clone --depth 1 https://github.com/Eeems/vbuild /tmp/vbuild-src
+          python -m pip install -r /tmp/vbuild-src/requirements.txt
+          mkdir -p "$HOME/.local/bin"
+          cat > "$HOME/.local/bin/vbuild" <<'EOF'
+          #!/usr/bin/env bash
+          exec python -m vbuild "$@"
+          EOF
+          chmod +x "$HOME/.local/bin/vbuild"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+          echo "PYTHONPATH=/tmp/vbuild-src" >> "$GITHUB_ENV"
+          export PATH="$HOME/.local/bin:$PATH"
+          export PYTHONPATH=/tmp/vbuild-src
           vbuild --help >/dev/null
 
       - name: Clone vellum build repo
